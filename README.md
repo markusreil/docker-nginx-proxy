@@ -12,15 +12,16 @@ Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxpro
 
 - Docker + Docker Compose v2
 - OpenSSL (only needed for the standalone script, not for Compose)
-- A local domain pointing at `127.0.0.1` (e.g. via `/etc/hosts` or dnsmasq)
+- No `/etc/hosts` wildcard needed: `*.localhost` resolves to `127.0.0.1` automatically on modern systems/browsers. `/etc/hosts` does not support wildcards, which is why `localhost` is the default `DOMAIN`.
 
 ## Quickstart
 
 ```bash
-# 1. Configure (defaults: DOMAIN=local.test, CERT_DAYS=825)
+# 1. Configure (defaults: DOMAIN=localhost, CERT_DAYS=825)
 cp .env .env  # edit DOMAIN / CERT_DAYS as needed
 
-# 2. Add host entries, e.g. in /etc/hosts
+# 2. No host entries needed for *.localhost — it already points to 127.0.0.1.
+# For a custom DOMAIN (e.g. local.test) add explicit entries, as /etc/hosts has no wildcards:
 # 127.0.0.1 local.test app1.local.test app2.local.test
 
 # 3. Start
@@ -39,7 +40,7 @@ services:
     expose:
       - "3000"
     environment:
-      VIRTUAL_HOST: app1.local.test
+      VIRTUAL_HOST: app1.localhost
       VIRTUAL_PORT: "3000"
     networks:
       - web-proxy
@@ -49,7 +50,7 @@ networks:
     external: true
 ```
 
-Visit `https://app1.local.test` (expect a self-signed warning until you trust the cert, see below).
+Visit `https://app1.localhost` (expect a self-signed warning until you trust the cert, see below).
 
 ## Configuration
 
@@ -57,7 +58,7 @@ Visit `https://app1.local.test` (expect a self-signed warning until you trust th
 
 | Var | Default | Description |
 | --- | --- | --- |
-| `DOMAIN` | `local.test` | Base domain; cert covers `DOMAIN` + `*.DOMAIN` |
+| `DOMAIN` | `localhost` | Base domain; cert covers `DOMAIN` + `*.DOMAIN` |
 | `CERT_DAYS` | `825` | Cert validity in days |
 
 Both are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing).
@@ -67,21 +68,21 @@ Both are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing).
 The CA is self-signed, so browsers warn until you trust `./certs`-equivalent from the volume. Extract it first:
 
 ```bash
-docker compose cp certgen:/certs/local.test.crt ./local.test.crt
-# replace local.test with your $DOMAIN
+docker compose cp certgen:/certs/localhost.crt ./localhost.crt
+# replace localhost with your $DOMAIN
 ```
 
 Then trust:
 
 ```bash
 # Linux
-sudo cp local.test.crt /usr/local/share/ca-certificates/local.test.crt && sudo update-ca-certificates
+sudo cp localhost.crt /usr/local/share/ca-certificates/localhost.crt && sudo update-ca-certificates
 
 # macOS
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./local.test.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./localhost.crt
 
 # Windows
-# import ./local.test.crt into 'Trusted Root Certification Authorities' via certlm.msc
+# import ./localhost.crt into 'Trusted Root Certification Authorities' via certlm.msc
 ```
 
 ## Regenerate certs

@@ -10,7 +10,7 @@ services:
     volumes:
       - certs:/certs
   nginx:
-    image: nginxproxy/nginx-proxy:latest
+    image: nginxproxy/nginx-proxy:1.11
     restart: unless-stopped
     ports:
       - "80:80"

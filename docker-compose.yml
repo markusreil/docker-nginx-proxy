@@ -1,8 +1,7 @@
-name: nginx-proxy
+name: web-proxy
 services:
   certgen:
     build: ./certgen
-    container_name: certgen
     env_file:
       - .env
     environment:
@@ -10,9 +9,8 @@ services:
       CERT_DAYS: ${CERT_DAYS:?CERT_DAYS must be defined in .env}
     volumes:
       - certs:/certs
-  nginx-proxy:
+  nginx:
     image: nginxproxy/nginx-proxy:latest
-    container_name: nginx-proxy
     restart: unless-stopped
     ports:
       - "80:80"

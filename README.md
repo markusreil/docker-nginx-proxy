@@ -5,7 +5,7 @@ Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxpro
 ## How it works
 
 1. `certgen` (built from `./certgen`, Alpine + OpenSSL) generates `<DOMAIN>.crt` / `<DOMAIN>.key` valid for `<DOMAIN>` and `*.<DOMAIN>` into a shared `certs` volume. Idempotent — skips if both files already exist.
-2. `nginx-proxy` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
+2. `nginx` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
 3. Any container on the `web-proxy` network with `VIRTUAL_HOST` set gets routed + TLS.
 
 ## Prerequisites
@@ -27,7 +27,7 @@ cp .env .env  # edit DOMAIN / CERT_DAYS as needed
 docker compose up -d --build
 
 # 4. Verify certs were created
-docker compose exec nginx-proxy ls /etc/nginx/certs
+docker compose exec nginx ls /etc/nginx/certs
 ```
 
 Then attach any app to the proxy:
@@ -88,7 +88,7 @@ sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keyc
 
 ```bash
 docker compose down -v  # drops the certs volume; omit -v to keep certs
-# or: docker volume rm nginx-proxy_certs
+# or: docker volume rm web-proxy_certs
 docker compose up -d --build
 ```
 
@@ -110,7 +110,7 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ```
 .
-├── docker-compose.yml          # certgen + nginx-proxy, shared certs volume, web-proxy network
+├── docker-compose.yml          # certgen + nginx, shared certs volume, web-proxy network
 ├── .env                        # DOMAIN, CERT_DAYS
 ├── certgen/
 │   ├── Dockerfile              # alpine + openssl

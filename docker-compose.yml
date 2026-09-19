@@ -24,6 +24,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    expose:
+      - "8080"
     labels:
       homepage.group: Infrastructure
       homepage.name: nginx-proxy
@@ -39,6 +41,7 @@ services:
       - html:/usr/share/nginx/html
       - ./vhost.d:/etc/nginx/vhost.d:ro
       - ./conf.d/global-upload-limit.conf:/etc/nginx/conf.d/global-upload-limit.conf:ro
+      - ./conf.d/stub_status.conf:/etc/nginx/conf.d/stub_status.conf:ro
     networks:
       - web-proxy
     depends_on:

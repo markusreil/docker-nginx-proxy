@@ -5,7 +5,7 @@ services:
     env_file:
       - .env
     environment:
-      DOMAIN: ${DOMAIN:?DOMAIN must be defined in .env}
+      BASE_DOMAIN: ${BASE_DOMAIN:?BASE_DOMAIN must be defined in .env}
       CERT_DAYS: ${CERT_DAYS:?CERT_DAYS must be defined in .env}
     volumes:
       - certs:/certs
@@ -15,6 +15,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    labels:
+      homepage.group: Infrastructure
+      homepage.name: nginx-proxy
+      homepage.icon: si-nginx
+      homepage.description: Reverse proxy
+      homepage.weight: -100
+      homepage.showStats: true
+      homepage.siteMonitor: http://nginx:8080/stub_status
     volumes:
       - /var/run/docker.sock:/tmp/docker.sock:ro
       - certs:/etc/nginx/certs:ro

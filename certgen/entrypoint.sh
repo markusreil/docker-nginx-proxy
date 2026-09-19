@@ -1,15 +1,15 @@
 #!/usr/bin/env sh
 # Container entrypoint: idempotently generate self-signed wildcard cert.
-# Env: DOMAIN (default local.test), CERT_DAYS (default 825). Output dir: /certs.
+# Env: BASE_DOMAIN (default local.test), CERT_DAYS (default 825). Output dir: /certs.
 set -eu
 
-DOMAIN="${DOMAIN:-local.test}"
+BASE_DOMAIN="${BASE_DOMAIN:-local.test}"
 CERT_DAYS="${CERT_DAYS:-825}"
 CERTS_DIR="/certs"
 
 mkdir -p "$CERTS_DIR"
-KEY_FILE="$CERTS_DIR/$DOMAIN.key"
-CRT_FILE="$CERTS_DIR/$DOMAIN.crt"
+KEY_FILE="$CERTS_DIR/$BASE_DOMAIN.key"
+CRT_FILE="$CERTS_DIR/$BASE_DOMAIN.crt"
 DEFAULT_KEY="$CERTS_DIR/default.key"
 DEFAULT_CRT="$CERTS_DIR/default.crt"
 
@@ -30,7 +30,7 @@ req_extensions = v3_req
 prompt = no
 
 [req_distinguished_name]
-CN = *.$DOMAIN
+CN = *.$BASE_DOMAIN
 
 [v3_req]
 basicConstraints = CA:FALSE
@@ -39,8 +39,8 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = $DOMAIN
-DNS.2 = *.$DOMAIN
+DNS.1 = $BASE_DOMAIN
+DNS.2 = *.$BASE_DOMAIN
 EOF
 
   openssl req -x509 -newkey rsa:2048 \
@@ -51,7 +51,7 @@ EOF
   chmod 600 "$KEY_FILE"
   chmod 644 "$CRT_FILE"
 
-  echo "Done: $CRT_FILE (CN=*.$DOMAIN, SANs: $DOMAIN, *.$DOMAIN, $CERT_DAYS days)"
+  echo "Done: $CRT_FILE (CN=*.$BASE_DOMAIN, SANs: $BASE_DOMAIN, *.$BASE_DOMAIN, $CERT_DAYS days)"
 }
 
 copy_if_missing() {
@@ -68,7 +68,7 @@ copy_if_missing() {
   fi
 }
 
-# Ensure default cert exists as copy of $DOMAIN files (nginx-proxy fallback).
+# Ensure default cert exists as copy of $BASE_DOMAIN files (nginx-proxy fallback).
 # Do not overwrite existing default.* files. Preserve perms (600 key, 644 crt).
 ensure_default() {
   if [ -f "$DEFAULT_KEY" ] && [ -f "$DEFAULT_CRT" ]; then

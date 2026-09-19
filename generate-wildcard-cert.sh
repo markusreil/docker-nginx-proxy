@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-DOMAIN="${1:-local.test}"
+BASE_DOMAIN="${1:-local.test}"
 CERTS_DIR="${2:-./certs}"
 DAYS="${3:-825}"
 
@@ -26,8 +26,8 @@ fi
 
 mkdir -p "$CERTS_DIR"
 
-KEY_FILE="$CERTS_DIR/$DOMAIN.key"
-CRT_FILE="$CERTS_DIR/$DOMAIN.crt"
+KEY_FILE="$CERTS_DIR/$BASE_DOMAIN.key"
+CRT_FILE="$CERTS_DIR/$BASE_DOMAIN.crt"
 
 if [[ -e "$KEY_FILE" || -e "$CRT_FILE" ]]; then
   echo "Error: $KEY_FILE or $CRT_FILE already exists. Remove them first to regenerate." >&2
@@ -46,7 +46,7 @@ req_extensions = v3_req
 prompt = no
 
 [req_distinguished_name]
-CN = *.$DOMAIN
+CN = *.$BASE_DOMAIN
 
 [v3_req]
 basicConstraints = CA:FALSE
@@ -55,8 +55,8 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = $DOMAIN
-DNS.2 = *.$DOMAIN
+DNS.1 = $BASE_DOMAIN
+DNS.2 = *.$BASE_DOMAIN
 EOF
 
 openssl req -x509 -newkey rsa:2048 \
@@ -69,12 +69,12 @@ chmod 644 "$CRT_FILE"
 
 echo "Done:"
 echo "  key:  $KEY_FILE"
-echo "  cert: $CRT_FILE (CN=*.$DOMAIN, SANs: $DOMAIN, *.$DOMAIN, valid $DAYS days)"
+echo "  cert: $CRT_FILE (CN=*.$BASE_DOMAIN, SANs: $BASE_DOMAIN, *.$BASE_DOMAIN, valid $DAYS days)"
 echo ""
 echo "nginx: mount this dir as /etc/nginx/certs (already done in docker-compose.yml)."
 echo "Then restart: docker compose restart nginx"
 echo ""
 echo "Trust it locally (optional, removes browser warning):"
-echo "  Linux:   sudo cp $CRT_FILE /usr/local/share/ca-certificates/$DOMAIN.crt && sudo update-ca-certificates"
+echo "  Linux:   sudo cp $CRT_FILE /usr/local/share/ca-certificates/$BASE_DOMAIN.crt && sudo update-ca-certificates"
 echo "  macOS:   sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $CRT_FILE"
 echo "  Windows: import $CRT_FILE into 'Trusted Root Certification Authorities' via certlm.msc"

@@ -63,6 +63,22 @@ Visit `https://app1.localhost` (expect a self-signed warning until you trust the
 
 Both are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing).
 
+## Per-host upload limits
+
+nginx-proxy's default body-size limit is 1 MB. To raise it per host, drop a file named after the `VIRTUAL_HOST` into `./vhost.d` (mounted at `/etc/nginx/vhost.d`):
+
+```bash
+echo 'client_max_body_size 50m;' > vhost.d/app1.localhost
+docker compose exec nginx nginx -s reload   # re-reads vhost.d (no container restart needed)
+```
+
+Only that host is affected; other vhosts keep the global default. Notes:
+
+- The global upload limit for all hosts is set in `conf.d/global-upload-limit.conf` (default `10m`). Edit it and reload to change it everywhere.
+- Use `<host>_location` as the filename (e.g. `vhost.d/app1.localhost_location`) to apply the limit to the `location` block instead of the whole server block.
+- `vhost.d/default` applies to any vhost without its own file.
+- Per-host files override the global limit. `CLIENT_MAX_BODY_SIZE` is not supported by this image (see nginx-proxy's [custom nginx configuration](https://github.com/nginx-proxy/nginx-proxy/tree/main/docs#custom-nginx-configuration)).
+
 ## Trust the cert locally (removes browser warning)
 
 The CA is self-signed, so browsers warn until you trust `./certs`-equivalent from the volume. Extract it first:
@@ -113,6 +129,9 @@ Refuses to overwrite existing files — delete them first to regenerate.
 .
 ├── docker-compose.yml          # certgen + nginx, shared certs volume, web-proxy network
 ├── .env                        # DOMAIN, CERT_DAYS
+├── vhost.d/                    # per-host nginx config (e.g. upload limits), mounted into nginx
+├── conf.d/
+│   └── global-upload-limit.conf # global client_max_body_size (default 10m)
 ├── certgen/
 │   ├── Dockerfile              # alpine + openssl
 │   └── entrypoint.sh           # idempotent wildcard cert generation (/certs)

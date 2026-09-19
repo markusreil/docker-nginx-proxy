@@ -23,9 +23,11 @@ services:
       homepage.weight: -100
       homepage.showStats: true
       homepage.siteMonitor: http://nginx:8080/stub_status
+      com.github.nginx-proxy.nginx: "true"
     volumes:
       - /var/run/docker.sock:/tmp/docker.sock:ro
       - certs:/etc/nginx/certs:ro
+      - html:/usr/share/nginx/html
       - ./vhost.d:/etc/nginx/vhost.d:ro
       - ./conf.d/global-upload-limit.conf:/etc/nginx/conf.d/global-upload-limit.conf:ro
     networks:
@@ -33,6 +35,18 @@ services:
     depends_on:
       certgen:
         condition: service_completed_successfully
+  acme-companion:
+    image: nginxproxy/acme-companion:2.8
+    restart: unless-stopped
+    environment:
+      DEFAULT_EMAIL: ${LE_EMAIL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - certs:/etc/nginx/certs:rw
+      - html:/usr/share/nginx/html:rw
+      - acme:/etc/acme.sh
+    networks:
+      - web-proxy
 
 networks:
   web-proxy:
@@ -40,3 +54,5 @@ networks:
 
 volumes:
   certs:
+  html:
+  acme:

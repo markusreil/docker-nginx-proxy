@@ -7,6 +7,7 @@ Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxpro
 1. `certgen` (built from `./certgen`, Alpine + OpenSSL) generates `<BASE_DOMAIN>.crt` / `<BASE_DOMAIN>.key` valid for `<BASE_DOMAIN>` and `*.<BASE_DOMAIN>` into a shared `certs` volume. Idempotent — skips if both files already exist.
 2. `nginx` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
 3. Any container on the `web-proxy` network with `VIRTUAL_HOST` set gets routed + TLS.
+4. `acme-companion` (nginxproxy/acme-companion) watches the Docker socket: any container that sets `ACME_HOST` gets a real Let's Encrypt cert issued into the same `certs` volume. Containers without `ACME_HOST` keep using the self-signed wildcard (`default.*`) — the two coexist.
 
 ## Prerequisites
 
@@ -60,8 +61,37 @@ Visit `https://app1.localhost` (expect a self-signed warning until you trust the
 | --- | --- | --- |
 | `BASE_DOMAIN` | `localhost` | Base domain; cert covers `BASE_DOMAIN` + `*.BASE_DOMAIN` |
 | `CERT_DAYS` | `825` | Cert validity in days |
+| `LE_EMAIL` | *(empty)* | Optional contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). Leave empty for local-only use. |
 
-Both are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing).
+`BASE_DOMAIN` and `CERT_DAYS` are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing); `LE_EMAIL` is optional.
+
+## Real certs (Let's Encrypt)
+
+Local-only containers just set `VIRTUAL_HOST` — they're proxied and served with the self-signed wildcard (`default.*`). To get a real, publicly trusted cert instead, add `ACME_HOST` to the same container:
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    expose:
+      - "443"
+    environment:
+      VIRTUAL_HOST: app1.example.com     # routes + serves TLS
+      VIRTUAL_PORT: "443"
+      ACME_HOST: app1.example.com        # signals acme-companion: issue a real cert
+      ACME_EMAIL: you@example.com        # optional per-container contact (fallback: LE_EMAIL)
+      LETSENCRYPT_TEST: "true"           # optional: use Let's Encrypt staging first
+    networks:
+      - web-proxy
+
+networks:
+  web-proxy:
+    external: true
+```
+
+- `ACME_HOST` must match `VIRTUAL_HOST`. Omit `ACME_HOST` to keep the self-signed fallback.
+- Requires HTTP port 80 to be reachable from the internet (HTTP-01 challenge). Try `LETSENCRYPT_TEST: "true"` (staging) before going live, then remove it.
+- Wildcard certs (`*.example.com`) are possible via DNS-01 challenges, but need a DNS provider setup — see the [acme-companion docs](https://github.com/nginx-proxy/acme-companion). Keep `BASE_DOMAIN` for the internal wildcard and use distinct public hostnames for Let's Encrypt.
 
 ## Per-host upload limits
 
@@ -173,7 +203,7 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ```
 .
-├── docker-compose.yml          # certgen + nginx, shared certs volume, web-proxy network
+├── docker-compose.yml          # certgen + nginx + acme-companion, shared certs/html/acme volumes, web-proxy network
 ├── .env                        # BASE_DOMAIN, CERT_DAYS
 ├── vhost.d/                    # per-host nginx config (e.g. upload limits), mounted into nginx
 ├── conf.d/
@@ -186,5 +216,5 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ## Notes
 
-- Self-signed only — for local dev, not production. For public hosts use `nginx-proxy` + `acme-companion` instead.
+- Out of the box this is a self-signed local setup; the bundled `acme-companion` adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, `CN=*.BASE_DOMAIN`, SANs `BASE_DOMAIN` + `*.BASE_DOMAIN`, `serverAuth` EKU.

@@ -122,7 +122,7 @@ Only that host is affected; other vhosts keep the global default. Notes:
 
 ## Homepage status card (nginx stub_status)
 
-The `nginx` service carries `homepage.*` labels so Homepage (https://gethomepage.dev) auto-discovers it as a card showing the proxy's Docker status and, when clicked, CPU/memory/network stats. It also sets:
+The `nginx` service carries `homepage.*` labels so Homepage (https://gethomepage.dev) auto-discovers it as a card showing the proxy's Docker status and, when clicked, CPU/memory/network stats. `certgen` and `acme-companion` carry the same group (`Infrastructure`) with `homepage.icon` and `homepage.weight` labels, so all three proxy components appear as status/stats cards. It also sets:
 
 ```
 homepage.siteMonitor: http://nginx:8080/stub_status

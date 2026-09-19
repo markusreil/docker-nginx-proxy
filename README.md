@@ -4,10 +4,20 @@ Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxpro
 
 ## How it works
 
-1. `certgen` (built from `./certgen`, Alpine + OpenSSL) generates `<BASE_DOMAIN>.crt` / `<BASE_DOMAIN>.key` valid for `<BASE_DOMAIN>` and `*.<BASE_DOMAIN>` into a shared `certs` volume. Idempotent — skips if both files already exist.
+1. `certgen` (built from `./certgen`, Alpine + OpenSSL + docker-gen) runs as a long-lived sidecar. On startup it generates a base cert for your local domain (`<BASE_DOMAIN>.crt`/`.key` valid for `<BASE_DOMAIN>` and `*.<BASE_DOMAIN>`), plus a `default.*` copy for nginx-proxy's fallback. Idempotent — skips if files already exist.
 2. `nginx` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
 3. Any container on the `web-proxy` network with `VIRTUAL_HOST` set gets routed + TLS.
-4. `acme-companion` (nginxproxy/acme-companion) watches the Docker socket: any container that sets `ACME_HOST` gets a real Let's Encrypt cert issued into the same `certs` volume. Containers without `ACME_HOST` keep using the self-signed wildcard (`default.*`) — the two coexist.
+4. `certgen` watches container events via docker-gen. When a `VIRTUAL_HOST` is 3+ labels deep (e.g. `app.sub1.localhost`), it generates a wildcard cert for the parent domain (`sub1.localhost` -> `sub1.localhost.crt`/`.key`, SANs `sub1.localhost` + `*.sub1.localhost`) on demand, then forces nginx to re-render and reload so the new cert is used immediately.
+
+## Multi-level hosts (`app.sub1.localhost`)
+
+nginx server names support wildcards at any depth, so routing works for `app.sub1.localhost` out of the box. TLS is the catch: a wildcard cert `*.localhost` only covers *one* label, so `app.sub1.localhost` needs its own cert. `certgen` handles this automatically:
+
+- Start any container with `VIRTUAL_HOST=app.sub1.localhost` (3+ labels).
+- `certgen` notices it, generates a wildcard cert for `sub1.localhost` (SANs `sub1.localhost` + `*.sub1.localhost`), and reloads nginx.
+- All future hosts under `*.sub1.localhost` reuse that cert — no per-host config.
+
+Single-label hosts (`app1.localhost`) and the bare domain keep using the base `*.<BASE_DOMAIN>` cert. Regexp (`~^...`), asterisk (`*.`) and port-bearing `VIRTUAL_HOST` values are ignored by the on-demand cert logic.
 
 ## Prerequisites
 
@@ -90,6 +100,7 @@ networks:
 ```
 
 - `ACME_HOST` must match `VIRTUAL_HOST`. Omit `ACME_HOST` to keep the self-signed fallback.
+- An empty `ACME_HOST=` placeholder is harmless: acme-companion treats it exactly like the variable being absent (the container is skipped, no cert is issued, self-signed fallback stays). This is fine as a template placeholder for services that may later opt in.
 - Requires HTTP port 80 to be reachable from the internet (HTTP-01 challenge). Try `LETSENCRYPT_TEST: "true"` (staging) before going live, then remove it.
 - Wildcard certs (`*.example.com`) are possible via DNS-01 challenges, but need a DNS provider setup — see the [acme-companion docs](https://github.com/nginx-proxy/acme-companion). Keep `BASE_DOMAIN` for the internal wildcard and use distinct public hostnames for Let's Encrypt.
 
@@ -187,6 +198,8 @@ docker compose up -d --build
 
 Changing `BASE_DOMAIN` generates a separate `<new-domain>.crt`/`.key` pair; old files remain in the volume.
 
+To regenerate a single host's cert, delete its files from the `certs` volume (e.g. `sub1.localhost.crt`/`.key`) — `certgen` will recreate it within ~30s or on the next container event.
+
 ## Standalone script (no Docker)
 
 `generate-wildcard-cert.sh` does the same thing on the host and writes nginx-proxy-compatible files (`<domain>.crt` + `<domain>.key`):
@@ -203,14 +216,19 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ```
 .
-├── docker-compose.yml          # certgen + nginx + acme-companion, shared certs/html/acme volumes, web-proxy network
+├── docker-compose.yml          # certgen (docker-gen sidecar) + nginx, shared certs volume, web-proxy network
 ├── .env                        # BASE_DOMAIN, CERT_DAYS
 ├── vhost.d/                    # per-host nginx config (e.g. upload limits), mounted into nginx
 ├── conf.d/
 │   └── global-upload-limit.conf # global client_max_body_size (default 10m)
 ├── certgen/
-│   ├── Dockerfile              # alpine + openssl
-│   └── entrypoint.sh           # idempotent wildcard cert generation (/certs)
+│   ├── Dockerfile              # alpine + openssl + docker-cli + docker-gen
+│   ├── README.md               # certgen docs
+│   └── docker/                 # build files copied into the image
+│       ├── entrypoint.sh       # bootstrap base cert, then run docker-gen (watch)
+│       ├── lib.sh              # shared cert helpers (gen_cert, ensure_default)
+│       ├── on-change.sh        # generate missing parent-domain certs + reload nginx
+│       └── certs.tmpl          # docker-gen template: hosts needing parent certs
 └── generate-wildcard-cert.sh   # host-side equivalent (Linux/macOS/WSL)
 ```
 
@@ -218,3 +236,4 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 - Out of the box this is a self-signed local setup; the bundled `acme-companion` adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, `CN=*.BASE_DOMAIN`, SANs `BASE_DOMAIN` + `*.BASE_DOMAIN`, `serverAuth` EKU.
+- `certgen` needs the docker socket to watch events and to trigger nginx reloads. It reloads the nginx container by its compose-fixed name `web-proxy-nginx-1`.

@@ -1,0 +1,34 @@
+{{- /* certs.tmpl - renders the list of parent-domain certs that need to exist
+     for the currently running containers' VIRTUAL_HOST values.
+
+     For every vhost with 3+ labels (app.sub.domain.tld), nginx-proxy looks
+     for a cert named <parent>.crt (one level up: sub.domain.tld) and uses it
+     for ALL vhosts under that domain.  Here we emit the parent name once,
+     but only when that cert does not already exist, so docker-gen's notify
+     fires only when there is something to create.
+
+     Containers opting into Let's Encrypt via ACME_HOST are skipped: their
+     certs are acme-companion's job (an empty ACME_HOST= is treated as
+     absent, matching acme-companion semantics).
+     */ -}}
+{{- $needed := dict -}}
+{{- range $c := $ -}}
+  {{- if and $c.Env.VIRTUAL_HOST (not $c.Env.ACME_HOST) -}}
+    {{- range $host := splitList "," $c.Env.VIRTUAL_HOST -}}
+      {{- $h := trim $host -}}
+      {{- if and (ne $h "") (not (hasPrefix "*" $h)) (not (hasPrefix "~" $h)) (not (contains ":" $h)) -}}
+        {{- $labels := splitList "." $h -}}
+        {{- if gt (len $labels) 2 -}}
+          {{- $parent := join "." (slice $labels 1) -}}
+          {{- if not (exists (printf "/certs/%s.crt" $parent)) -}}
+            {{- $_ := set $needed $parent "" -}}
+          {{- end -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $parents := sortAlpha (keys $needed) -}}
+{{- if gt (len $parents) 0 -}}
+{{- join "\n" $parents }}{{ "\n" -}}
+{{- end -}}

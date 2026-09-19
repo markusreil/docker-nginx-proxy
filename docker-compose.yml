@@ -2,6 +2,7 @@ name: web-proxy
 services:
   certgen:
     build: ./certgen
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -9,6 +10,14 @@ services:
       CERT_DAYS: ${CERT_DAYS:?CERT_DAYS must be defined in .env}
     volumes:
       - certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    network_mode: none
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /certs/default.crt ] && [ -f /certs/default.key ]"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
   nginx:
     image: nginxproxy/nginx-proxy:1.11
     restart: unless-stopped
@@ -34,7 +43,7 @@ services:
       - web-proxy
     depends_on:
       certgen:
-        condition: service_completed_successfully
+        condition: service_healthy
   acme-companion:
     image: nginxproxy/acme-companion:2.8
     restart: unless-stopped

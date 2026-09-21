@@ -54,3 +54,10 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 
 Run it via the compose file in the repository root; a healthcheck verifies
 `default.crt`/`default.key` exist before nginx starts.
+
+## Why no PUID/PGID privilege drop
+
+`certgen` runs as root under `network_mode: none` and only writes tiny cert
+files to the shared `certs` volume, which nginx reads as root — there are no
+large data dirs and no persistent ownership issue. Upstream images
+(`nginx-proxy`, `acme-companion`) manage their own users.

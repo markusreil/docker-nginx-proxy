@@ -29,7 +29,7 @@ Single-label hosts (`app1.localhost`) and the bare domain keep using the base `*
 
 ```bash
 # 1. Configure (defaults: BASE_DOMAIN=localhost, CERT_DAYS=825)
-cp .env .env  # edit BASE_DOMAIN / CERT_DAYS as needed
+cp env.example .env  # edit BASE_DOMAIN / CERT_DAYS as needed
 
 # 2. No host entries needed for *.localhost — it already points to 127.0.0.1.
 # For a custom BASE_DOMAIN (e.g. local.test) add explicit entries, as /etc/hosts has no wildcards:
@@ -73,6 +73,8 @@ Visit `https://app1.localhost` (expect a self-signed warning until you trust the
 | `BASE_DOMAIN` | `localhost` | Base domain; cert covers `BASE_DOMAIN` + `*.BASE_DOMAIN` |
 | `CERT_DAYS` | `825` | Cert validity in days |
 | `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
+| `NGINX_PROXY_VERSION` | `1.11` | Upstream nginx-proxy image tag (pinned per spec rule 1) |
+| `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned per spec rule 1) |
 | `LE_EMAIL` | *(empty)* | Optional contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). Leave empty for local-only use. |
 
 `BASE_DOMAIN` and `CERT_DAYS` are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing); `LE_EMAIL` is optional.
@@ -237,6 +239,8 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ## Notes
 
+- No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`LETSENCRYPT_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
+- `nginx-proxy` and `acme-companion` use upstream images (no custom build) per spec rule 6: the image *is* the service here, no first-run seeding or config generation is needed.
 - Out of the box this is a self-signed local setup; the bundled `acme-companion` adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, `CN=*.BASE_DOMAIN`, SANs `BASE_DOMAIN` + `*.BASE_DOMAIN`, `serverAuth` EKU.
 - `certgen` needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.

@@ -29,7 +29,7 @@ services:
       retries: 12
       start_period: 5s
   nginx:
-    image: nginxproxy/nginx-proxy:1.11
+    image: nginxproxy/nginx-proxy:${NGINX_PROXY_VERSION:?NGINX_PROXY_VERSION must be defined in .env}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -58,7 +58,7 @@ services:
       certgen:
         condition: service_healthy
   acme-companion:
-    image: nginxproxy/acme-companion:2.8
+    image: nginxproxy/acme-companion:${ACME_COMPANION_VERSION:?ACME_COMPANION_VERSION must be defined in .env}
     restart: unless-stopped
     labels:
       homepage.group: Infrastructure

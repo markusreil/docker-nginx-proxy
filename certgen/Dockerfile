@@ -1,5 +1,9 @@
 FROM alpine:3.20
 
+ARG BUILD_DATE=unknown
+ENV BASE_IMAGE=alpine:3.20
+ENV BUILD_DATE=${BUILD_DATE}
+
 # openssl for cert generation, docker-cli to trigger nginx-proxy re-render
 RUN apk add --no-cache openssl docker-cli
 

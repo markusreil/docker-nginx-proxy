@@ -1,7 +1,10 @@
 name: web-proxy
 services:
   certgen:
-    build: ./certgen
+    build:
+      context: ./certgen
+      args:
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     env_file:
       - .env

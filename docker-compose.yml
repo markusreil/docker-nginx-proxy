@@ -79,7 +79,7 @@ services:
 
 networks:
   web-proxy:
-    name: web-proxy
+    name: ${NGINX_PROXY_NETWORK:-web-proxy}
 
 volumes:
   certs:

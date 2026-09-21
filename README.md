@@ -6,7 +6,7 @@ Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxpro
 
 1. `certgen` (built from `./certgen`, Alpine + OpenSSL + docker-gen) runs as a long-lived sidecar. On startup it generates a base cert for your local domain (`<BASE_DOMAIN>.crt`/`.key` valid for `<BASE_DOMAIN>` and `*.<BASE_DOMAIN>`), plus a `default.*` copy for nginx-proxy's fallback. Idempotent — skips if files already exist.
 2. `nginx` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
-3. Any container on the `web-proxy` network with `VIRTUAL_HOST` set gets routed + TLS.
+3. Any container on the proxy network (default `web-proxy`, configurable via `NGINX_PROXY_NETWORK`) with `VIRTUAL_HOST` set gets routed + TLS.
 4. `certgen` watches container events via docker-gen. When a `VIRTUAL_HOST` is 3+ labels deep (e.g. `app.sub1.localhost`), it generates a wildcard cert for the parent domain (`sub1.localhost` -> `sub1.localhost.crt`/`.key`, SANs `sub1.localhost` + `*.sub1.localhost`) on demand, then forces nginx to re-render and reload so the new cert is used immediately.
 
 ## Multi-level hosts (`app.sub1.localhost`)
@@ -58,6 +58,7 @@ services:
 
 networks:
   web-proxy:
+    name: ${NGINX_PROXY_NETWORK:-web-proxy}
     external: true
 ```
 
@@ -71,6 +72,7 @@ Visit `https://app1.localhost` (expect a self-signed warning until you trust the
 | --- | --- | --- |
 | `BASE_DOMAIN` | `localhost` | Base domain; cert covers `BASE_DOMAIN` + `*.BASE_DOMAIN` |
 | `CERT_DAYS` | `825` | Cert validity in days |
+| `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
 | `LE_EMAIL` | *(empty)* | Optional contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). Leave empty for local-only use. |
 
 `BASE_DOMAIN` and `CERT_DAYS` are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing); `LE_EMAIL` is optional.
@@ -96,6 +98,7 @@ services:
 
 networks:
   web-proxy:
+    name: ${NGINX_PROXY_NETWORK:-web-proxy}
     external: true
 ```
 
@@ -163,7 +166,7 @@ which probes nginx for UP/DOWN + response time. That endpoint is **not enabled b
 Notes:
 
 - The endpoint is internal-only (no host port mapping) and restricted to Docker/LAN subnets.
-- The monitor URL assumes Homepage reaches the proxy over the `web-proxy` network (hostname `nginx`). If your Homepage container isn't on `web-proxy`, change `homepage.siteMonitor` to a host-reachable URL (e.g. `http://<host-ip>:8080/stub_status`).
+- The monitor URL assumes Homepage reaches the proxy over the proxy network (default `web-proxy`, hostname `nginx`). If your Homepage container isn't on that network, change `homepage.siteMonitor` to a host-reachable URL (e.g. `http://<host-ip>:8080/stub_status`).
 - Until the endpoint is enabled, the card shows the site monitor as DOWN; the Docker status and stats still work.
 
 ## Trust the cert locally (removes browser warning)
@@ -216,8 +219,8 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 ```
 .
-├── docker-compose.yml          # certgen (docker-gen sidecar) + nginx, shared certs volume, web-proxy network
-├── .env                        # BASE_DOMAIN, CERT_DAYS
+├── docker-compose.yml          # certgen (docker-gen sidecar) + nginx, shared certs volume, configurable proxy network (`NGINX_PROXY_NETWORK`, default `web-proxy`)
+├── .env                        # BASE_DOMAIN, CERT_DAYS, NGINX_PROXY_NETWORK
 ├── vhost.d/                    # per-host nginx config (e.g. upload limits), mounted into nginx
 ├── conf.d/
 │   └── global-upload-limit.conf # global client_max_body_size (default 10m)

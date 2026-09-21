@@ -23,7 +23,12 @@ done < /tmp/certs-needed.txt
 
 if [ "$generated" -eq 1 ]; then
   echo "Cert(s) generated; re-rendering nginx-proxy config..."
-  docker exec "web-proxy-nginx-1" sh -c \
+  target=$(find_nginx_container || true)
+  if [ -z "$target" ]; then
+    echo "WARNING: nginx container not found, skipping reload" >&2
+    exit 0
+  fi
+  docker exec "$target" sh -c \
     '/app/docker-entrypoint.sh /usr/local/bin/docker-gen /app/nginx.tmpl /etc/nginx/conf.d/default.conf; nginx -s reload' \
     || echo "WARNING: failed to re-render/reload nginx-proxy" >&2
 else

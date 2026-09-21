@@ -55,6 +55,38 @@ EOF
   return 0
 }
 
+# find_nginx_container - print the nginx-proxy container name, if any.
+# Honors $NGINX_CONTAINER when set/non-empty; otherwise looks up containers
+# by compose labels via the Docker socket (own compose project first, then
+# any project). Prints nothing and returns non-zero when none is found.
+find_nginx_container() {
+  if [ -n "${NGINX_CONTAINER:-}" ]; then
+    printf '%s\n' "$NGINX_CONTAINER"
+    return 0
+  fi
+
+  project=""
+  if id=$(hostname 2>/dev/null); then
+    project=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$id" 2>/dev/null || true)
+  fi
+
+  name=""
+  if [ -n "$project" ]; then
+    name=$(docker ps --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=nginx" --format '{{.Names}}' 2>/dev/null | head -n 1 || true)
+  fi
+
+  if [ -z "$name" ]; then
+    name=$(docker ps --filter "label=com.docker.compose.service=nginx" --format '{{.Names}}' 2>/dev/null | head -n 1 || true)
+  fi
+
+  if [ -z "$name" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$name"
+  return 0
+}
+
 # ensure_default - make sure nginx-proxy's fallback cert exists
 # (default.crt/.key) as a copy of the base DOMAIN cert.
 # Returns 0 if the default cert was (re)created, 1 if it already existed.

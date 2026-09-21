@@ -12,8 +12,10 @@ set -eu
 
 # (BASE_DOMAIN, CERT_DAYS, CERTS_DIR are provided by lib.sh defaults)
 
-# nginx-proxy container name is fixed by the compose project (name: web-proxy, service: nginx).
-NGINX_CONTAINER="web-proxy-nginx-1"
+# Resolve nginx container name once at startup for logging only; nginx may
+# start later, so do not fail if it is not found yet. Exported so on-change.sh
+# can use it as an override.
+NGINX_CONTAINER=$(find_nginx_container || true)
 export NGINX_CONTAINER
 
 echo "Certgen starting (BASE_DOMAIN=$BASE_DOMAIN, CERT_DAYS=$CERT_DAYS)"

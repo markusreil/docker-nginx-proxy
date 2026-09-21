@@ -40,16 +40,17 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
    3+-label `VIRTUAL_HOST`) whose cert does not exist yet; docker-gen only
    runs the notify command when that list changes.
 3. `on-change.sh` generates each missing cert and, when anything was created,
-   forces nginx-proxy to re-render its config and reload:
-   `docker exec web-proxy-nginx-1 sh -c '/app/docker-entrypoint.sh
-   /usr/local/bin/docker-gen /app/nginx.tmpl ...; nginx -s reload'`.
+   forces nginx-proxy to re-render its config and reload (target resolved
+   dynamically by compose labels, see below).
 
 ## Requirements
 
 - Docker socket mounted at `/var/run/docker.sock` (reads events, triggers the
   nginx reload).
 - `/certs` volume shared (read-only) with the nginx-proxy container. The nginx
-  container name is fixed to `web-proxy-nginx-1` by the compose project.
+  container is located dynamically by compose labels
+  (`com.docker.compose.service=nginx`, preferring the certgen container's own
+  compose project); set `$NGINX_CONTAINER` to override the lookup.
 
 Run it via the compose file in the repository root; a healthcheck verifies
 `default.crt`/`default.key` exist before nginx starts.

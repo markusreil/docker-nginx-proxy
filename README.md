@@ -236,4 +236,4 @@ Refuses to overwrite existing files — delete them first to regenerate.
 
 - Out of the box this is a self-signed local setup; the bundled `acme-companion` adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, `CN=*.BASE_DOMAIN`, SANs `BASE_DOMAIN` + `*.BASE_DOMAIN`, `serverAuth` EKU.
-- `certgen` needs the docker socket to watch events and to trigger nginx reloads. It reloads the nginx container by its compose-fixed name `web-proxy-nginx-1`.
+- `certgen` needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.

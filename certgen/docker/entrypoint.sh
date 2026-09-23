@@ -1,28 +1,31 @@
 #!/bin/sh
-# certgen: generates self-signed wildcard certs for the local proxy.
+# certgen: generates exact self-signed certs for proxied containers that opt
+# in via GEN_SELF_SIGNED_CERT.
 #
-# On startup it bootstraps the base DOMAIN cert + the nginx-proxy default
-# cert, then runs docker-gen to watch for containers whose VIRTUAL_HOST is
-# 3+ labels deep (e.g. app.sub1.localhost). For each such host it ensures a
-# wildcard cert for the parent domain (sub1.localhost) exists, generating it
-# on demand and triggering an nginx-proxy re-render + reload.
+# Startup does a one-shot render, runs the marker-gated one-time legacy sweep,
+# and runs an "initial" reconcile that only ever generates and grows the
+# manifest. The initial pass must never delete: downstream containers may not
+# have started yet, and an empty first render would otherwise wipe every cert.
+# docker-gen -watch then re-runs a "full" reconcile whenever the desired host
+# set changes (container start/stop/recreate) and at least every -interval
+# seconds, handling generation and removals, gated by GEN_REMOVAL_GRACE and
+# atomic .gone staging so nginx is reloaded before a cert is finally discarded.
 set -eu
 
 . /scripts/lib.sh
 
-# (BASE_DOMAIN, CERT_DAYS, CERTS_DIR are provided by lib.sh defaults)
+mkdir -p "$CERTS_DIR"
 
-# Resolve nginx container name once at startup for logging only; nginx may
-# start later, so do not fail if it is not found yet. Exported so on-change.sh
-# can use it as an override.
-NGINX_CONTAINER=$(find_nginx_container || true)
-export NGINX_CONTAINER
+# One-shot render so the initial pass sees the currently running containers.
+docker-gen /etc/docker-gen/certs.tmpl "$RENDER_FILE" 2>/dev/null || true
 
-echo "Certgen starting (BASE_DOMAIN=$BASE_DOMAIN, CERT_DAYS=$CERT_DAYS)"
-gen_cert "$BASE_DOMAIN" || true
-ensure_default || true
+# One-time legacy sweep; self-guarded by the .certgen.legacy-swept marker.
+legacy_sweep
 
-echo "Watching Docker container events for multi-level VIRTUAL_HOSTs..."
+# Generate-only first pass; never deletes.
+flock "$LOCK" /scripts/on-change.sh initial || true
+touch "$READY"
+
 exec docker-gen -watch -interval 30 -wait 100ms:500ms \
-  -notify "/scripts/on-change.sh" \
-  /etc/docker-gen/certs.tmpl /tmp/certs-needed.txt
+  -notify "flock $LOCK /scripts/on-change.sh full" \
+  /etc/docker-gen/certs.tmpl "$RENDER_FILE"

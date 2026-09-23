@@ -1,44 +1,88 @@
 # docker-nginx-proxy
 
-Local reverse proxy with automatic self-signed wildcard TLS. Spins up [`nginxproxy/nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) plus a one-shot `certgen` container that creates a wildcard cert for your local domain.
+Reverse proxy with automatic TLS, split into composable variants. Spins up [`nginxproxy/nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) plus, depending on the selected variant, a self-signed, opt-in `certgen` sidecar or [`nginxproxy/acme-companion`](https://github.com/nginx-proxy/acme-companion) for real Let's Encrypt certs.
+
+## Variants
+
+The stack is a base `docker-compose.yml` (variant-neutral: `nginx` on HTTP/80 only) plus per-variant override files. Which files are layered is chosen by `COMPOSE_FILE` in `.env`:
+
+| Variant | `COMPOSE_FILE` | TLS | Services |
+| --- | --- | --- | --- |
+| LAN, self-signed TLS (default) | `docker-compose.yml:docker-compose.lan.yml` | self-signed, per-host opt-in (`certgen`, always on) | `nginx` + `certgen` |
+| Internet, mandatory TLS | `docker-compose.yml:docker-compose.public.yml` | real certs (Let's Encrypt) | `nginx` + `acme-companion` |
+
+The safe default is **LAN (self-signed TLS)**: it serves plain HTTP on port 80 and self-signed HTTPS on 443, and never attempts certificate issuance. Every variant follows the same commands — only the `COMPOSE_FILE` value changes:
+
+```bash
+# LAN (default, self-signed TLS)
+cp env.example .env
+# .env: COMPOSE_FILE=docker-compose.yml:docker-compose.lan.yml
+docker compose config
+docker compose up -d --build
+
+# Public (mandatory TLS) — also set LE_EMAIL=you@example.com in .env
+cp env.example .env
+# .env: COMPOSE_FILE=docker-compose.yml:docker-compose.public.yml
+docker compose config
+docker compose up -d --build
+```
+
+To switch variants, edit `COMPOSE_FILE` in `.env` and re-run `docker compose config` / `docker compose up -d --build`.
 
 ## How it works
 
-1. `certgen` (built from `./certgen`, Alpine + OpenSSL + docker-gen) runs as a long-lived sidecar. On startup it generates a base cert for your local domain (`<BASE_DOMAIN>.crt`/`.key` valid for `<BASE_DOMAIN>` and `*.<BASE_DOMAIN>`), plus a `default.*` copy for nginx-proxy's fallback. Idempotent — skips if files already exist.
-2. `nginx` mounts that volume at `/etc/nginx/certs:ro` and terminates TLS automatically (no per-host config needed).
-3. Any container on the proxy network (default `web-proxy`, configurable via `NGINX_PROXY_NETWORK`) with `VIRTUAL_HOST` set gets routed + TLS.
-4. `certgen` watches container events via docker-gen. When a `VIRTUAL_HOST` is 3+ labels deep (e.g. `app.sub1.localhost`), it generates a wildcard cert for the parent domain (`sub1.localhost` -> `sub1.localhost.crt`/`.key`, SANs `sub1.localhost` + `*.sub1.localhost`) on demand, then forces nginx to re-render and reload so the new cert is used immediately.
+The base `docker-compose.yml` builds `nginx` from `./nginx` (wrapping upstream `nginxproxy/nginx-proxy:${NGINX_PROXY_VERSION}`) and runs it on port 80, joining the proxy network (default `web-proxy`, configurable via `NGINX_PROXY_NETWORK`). The two `conf.d` snippets (global upload limit and `stub_status`) are baked into the image at build time; only the Docker socket remains a host bind mount, while `html` and the `vhostd` config volume are named volumes. Variant overrides add TLS:
+
+1. **LAN (default)** — `docker-compose.lan.yml` publishes port 443, mounts a shared `certs` volume, sets `HTTPS_METHOD=noredirect` (HTTP requests are served as-is, no redirect to HTTPS) and `ENABLE_HTTP_ON_MISSING_CERT=true`, and runs `certgen` (built from `./certgen`, Alpine + OpenSSL + docker-gen), which is always on. `certgen` generates a self-signed cert **only** for proxied containers that opt in via `GEN_SELF_SIGNED_CERT` (truthy: `true`, `1`, `t`). The cert identity is the exact `VIRTUAL_HOST` value, written as `<host>.crt`/`.key` with `CN=<host>` and SAN `DNS:<host>` — nginx-proxy probes `/etc/nginx/certs/<host>.crt`, so one host maps to one cert pair. Hosts that don't opt in are served over HTTP only. To silence the browser warning, trust the cert via [Trust the cert locally](#trust-the-cert-locally-removes-browser-warning).
+2. **Public** — `docker-compose.public.yml` publishes port 443, mounts the shared `certs` volume and runs `acme-companion`, which obtains real Let's Encrypt certs for containers that opt in via `ACME_HOST`. It deliberately omits `certgen`, so there is no trusted self-signed fallback.
+
+Any container on the proxy network with `VIRTUAL_HOST` set gets routed. In the LAN variant:
+
+- `nginx` mounts the `certs` volume at `/etc/nginx/certs:ro` and terminates TLS automatically for hosts that have a cert (no per-host config needed).
+- `certgen` watches container events via docker-gen and reconciles the `certs` volume against the opted-in host set. When a host stops opting in (or its container goes away), its cert pair is deleted after a grace period (`GEN_REMOVAL_GRACE`, default 30s). nginx-proxy is forced to re-render and reload after any generate/remove so the change takes effect immediately.
 
 ## Multi-level hosts (`app.sub1.localhost`)
 
-nginx server names support wildcards at any depth, so routing works for `app.sub1.localhost` out of the box. TLS is the catch: a wildcard cert `*.localhost` only covers *one* label, so `app.sub1.localhost` needs its own cert. `certgen` handles this automatically:
+This section applies to the LAN variant (`certgen`). nginx server names support wildcards at any depth, so routing works for `app.sub1.localhost` out of the box. `certgen` does **not** collapse hosts into parent-domain wildcards: each opted-in `VIRTUAL_HOST` gets its own exact `<host>.crt`/`.key` (`CN=app.sub1.localhost`, SAN `DNS:app.sub1.localhost`). So `app.sub1.localhost` and `other.sub1.localhost` are independent certs — no sharing, and no special casing for multi-level names:
 
-- Start any container with `VIRTUAL_HOST=app.sub1.localhost` (3+ labels).
-- `certgen` notices it, generates a wildcard cert for `sub1.localhost` (SANs `sub1.localhost` + `*.sub1.localhost`), and reloads nginx.
-- All future hosts under `*.sub1.localhost` reuse that cert — no per-host config.
-
-Single-label hosts (`app1.localhost`) and the bare domain keep using the base `*.<BASE_DOMAIN>` cert. Regexp (`~^...`), asterisk (`*.`) and port-bearing `VIRTUAL_HOST` values are ignored by the on-demand cert logic.
+- Start any container with `VIRTUAL_HOST=app.sub1.localhost` and `GEN_SELF_SIGNED_CERT=true`.
+- `certgen` creates `app.sub1.localhost.crt`/`.key` and reloads nginx.
+- Regexp (`~^...`), asterisk (`*.`), port-bearing (`host:port`), path-bearing and `..`-containing `VIRTUAL_HOST` values are ignored by certgen (they can't be used as cert filenames).
 
 ## Prerequisites
 
 - Docker + Docker Compose v2
-- OpenSSL (only needed for the standalone script, not for Compose)
-- No `/etc/hosts` wildcard needed: `*.localhost` resolves to `127.0.0.1` automatically on modern systems/browsers. `/etc/hosts` does not support wildcards, which is why `localhost` is the default `BASE_DOMAIN`.
+- No `/etc/hosts` wildcard needed: `*.localhost` resolves to `127.0.0.1` automatically on modern systems/browsers, so `app1.localhost` works out of the box.
 
 ## Quickstart
 
+The commands below use the default **LAN (self-signed TLS)** variant. To use another variant, set `COMPOSE_FILE` as shown in [Variants](#variants).
+
 ```bash
-# 1. Configure (defaults: BASE_DOMAIN=localhost, CERT_DAYS=825)
-cp env.example .env  # edit BASE_DOMAIN / CERT_DAYS as needed
+# 1. Configure (defaults: LAN variant, CERT_DAYS=825)
+cp env.example .env  # COMPOSE_FILE defaults to the LAN variant
 
 # 2. No host entries needed for *.localhost — it already points to 127.0.0.1.
-# For a custom BASE_DOMAIN (e.g. local.test) add explicit entries, as /etc/hosts has no wildcards:
-# 127.0.0.1 local.test app1.local.test app2.local.test
+# For custom domains (e.g. app1.local.test) add explicit entries, as /etc/hosts has no wildcards:
+# 127.0.0.1 app1.local.test app2.local.test
 
-# 3. Start
+# 3. Validate and start
+docker compose config
 docker compose up -d --build
+```
 
-# 4. Verify certs were created
+For the LAN variant there is a convenience wrapper, `compose-lan.sh`, which bakes in the `-f` flags. With no arguments it rebuilds the images, **recreates the volumes** (`down -v`, so `certgen` regenerates fresh certs), and starts detached; pass any `docker compose` subcommand to delegate to it:
+
+```bash
+./compose-lan.sh                  # down -v + up -d --build (fresh build + certs)
+KEEP_VOLUMES=1 ./compose-lan.sh   # rebuild/start but keep existing volumes (certs)
+./compose-lan.sh ps               # delegate: docker compose -f ... ps
+./compose-lan.sh logs -f certgen  # ... any compose subcommand
+```
+
+Verify certs were created (the default LAN variant runs `certgen`):
+
+```bash
 docker compose exec nginx ls /etc/nginx/certs
 ```
 
@@ -53,6 +97,7 @@ services:
     environment:
       VIRTUAL_HOST: app1.localhost
       VIRTUAL_PORT: "3000"
+      GEN_SELF_SIGNED_CERT: "true"   # opt in to a self-signed cert for this host
     networks:
       - web-proxy
 
@@ -62,7 +107,7 @@ networks:
     external: true
 ```
 
-Visit `https://app1.localhost` (expect a self-signed warning until you trust the cert, see below).
+With `GEN_SELF_SIGNED_CERT=true` the LAN variant serves both `http://app1.localhost` (plain) and `https://app1.localhost` (self-signed); expect a browser warning on HTTPS until you trust the cert, see below. Without the opt-in flag the host is served over HTTP only.
 
 ## Configuration
 
@@ -70,18 +115,21 @@ Visit `https://app1.localhost` (expect a self-signed warning until you trust the
 
 | Var | Default | Description |
 | --- | --- | --- |
-| `BASE_DOMAIN` | `localhost` | Base domain; cert covers `BASE_DOMAIN` + `*.BASE_DOMAIN` |
-| `CERT_DAYS` | `825` | Cert validity in days |
+| `COMPOSE_FILE` | `docker-compose.yml:docker-compose.lan.yml` | Which compose files make up the stack (see [Variants](#variants)) |
 | `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
-| `NGINX_PROXY_VERSION` | `1.11` | Upstream nginx-proxy image tag (pinned per spec rule 1) |
+| `NGINX_PROXY_VERSION` | `1.11` | Base-image tag used to build the `nginx` image (build arg; pinned per spec rule 1) |
 | `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned per spec rule 1) |
-| `LE_EMAIL` | *(empty)* | Optional contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). Leave empty for local-only use. |
+| `LE_EMAIL` | *(empty)* | Contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
+| `CERT_DAYS` | `825` | Self-signed cert validity in days. **Required** by the LAN variant. |
+| `GEN_REMOVAL_GRACE` | `30` | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
 
-`BASE_DOMAIN` and `CERT_DAYS` are required by `docker-compose.yml` (`${VAR:?…}` fails fast if missing); `LE_EMAIL` is optional.
+`LE_EMAIL` is required by `docker-compose.public.yml`, and `CERT_DAYS` by `docker-compose.lan.yml` (`${VAR:?…}` fails fast if missing). `GEN_REMOVAL_GRACE` is optional (`${VAR:-default}`). The base variant needs none of them.
+
+Downstream containers opt in to a self-signed cert with `GEN_SELF_SIGNED_CERT=true` (truthy: `true`, `1`, `t`, case-insensitive). It is set on the proxied container, not in this `.env`.
 
 ## Real certs (Let's Encrypt)
 
-Local-only containers just set `VIRTUAL_HOST` — they're proxied and served with the self-signed wildcard (`default.*`). To get a real, publicly trusted cert instead, add `ACME_HOST` to the same container:
+ACME issuance belongs to the **public** variant (`COMPOSE_FILE=docker-compose.yml:docker-compose.public.yml`), which runs `acme-companion`. In the LAN variant no ACME cert is issued; containers that opt in via `GEN_SELF_SIGNED_CERT` are served with their exact self-signed `<host>.crt`, and everyone else is served over HTTP only. To get a real, publicly trusted cert instead, add `ACME_HOST` to the same container and select the public variant:
 
 ```yaml
 services:
@@ -104,96 +152,85 @@ networks:
     external: true
 ```
 
-- `ACME_HOST` must match `VIRTUAL_HOST`. Omit `ACME_HOST` to keep the self-signed fallback.
-- An empty `ACME_HOST=` placeholder is harmless: acme-companion treats it exactly like the variable being absent (the container is skipped, no cert is issued, self-signed fallback stays). This is fine as a template placeholder for services that may later opt in.
+- `ACME_HOST` must match `VIRTUAL_HOST`. Omit `ACME_HOST` to skip issuance.
+- The public variant deliberately omits `certgen`, so there is **no trusted self-signed fallback**: until a real cert is issued, nginx serves only HTTP (`ENABLE_HTTP_ON_MISSING_CERT=false`). Make sure port 80 stays reachable so the HTTP-01 challenge can complete.
+- An empty `ACME_HOST=` placeholder is harmless: acme-companion treats it exactly like the variable being absent (the container is skipped, no cert is issued). This is fine as a template placeholder for services that may later opt in.
 - Requires HTTP port 80 to be reachable from the internet (HTTP-01 challenge). Try `LETSENCRYPT_TEST: "true"` (staging) before going live, then remove it.
-- Wildcard certs (`*.example.com`) are possible via DNS-01 challenges, but need a DNS provider setup — see the [acme-companion docs](https://github.com/nginx-proxy/acme-companion). Keep `BASE_DOMAIN` for the internal wildcard and use distinct public hostnames for Let's Encrypt.
+- Wildcard certs (`*.example.com`) are possible via DNS-01 challenges, but need a DNS provider setup — see the [acme-companion docs](https://github.com/nginx-proxy/acme-companion). Use distinct public hostnames for Let's Encrypt.
 
 ## Per-host upload limits
 
-nginx-proxy's default body-size limit is 1 MB. To raise it per host, drop a file named after the `VIRTUAL_HOST` into `./vhost.d` (mounted at `/etc/nginx/vhost.d`):
+nginx-proxy's default body-size limit is 1 MB. The **global** default lives in
+`nginx/docker/conf.d/global-upload-limit.conf` (currently `10m`) and is baked
+into the `nginx` image — edit it and rebuild to change it everywhere:
 
 ```bash
-echo 'client_max_body_size 50m;' > vhost.d/app1.localhost
+# edit nginx/docker/conf.d/global-upload-limit.conf, then:
+docker compose -f docker-compose.yml -f docker-compose.lan.yml build nginx
+docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d nginx
+```
+
+To raise the limit **per host**, write a file named after the `VIRTUAL_HOST`
+into the `vhostd` named volume (mounted at `/etc/nginx/vhost.d`) and reload:
+
+```bash
+docker compose exec nginx sh -c 'printf "client_max_body_size 50m;\n" > /etc/nginx/vhost.d/app1.localhost'
 docker compose exec nginx nginx -s reload   # re-reads vhost.d (no container restart needed)
 ```
 
 Only that host is affected; other vhosts keep the global default. Notes:
 
-- The global upload limit for all hosts is set in `conf.d/global-upload-limit.conf` (default `10m`). Edit it and reload to change it everywhere.
-- Use `<host>_location` as the filename (e.g. `vhost.d/app1.localhost_location`) to apply the limit to the `location` block instead of the whole server block.
-- `vhost.d/default` applies to any vhost without its own file.
+- Use `<host>_location` as the filename (e.g. `/etc/nginx/vhost.d/app1.localhost_location`) to apply the limit to the `location` block instead of the whole server block.
+- `/etc/nginx/vhost.d/default` applies to any vhost without its own file.
 - Per-host files override the global limit. `CLIENT_MAX_BODY_SIZE` is not supported by this image (see nginx-proxy's [custom nginx configuration](https://github.com/nginx-proxy/nginx-proxy/tree/main/docs#custom-nginx-configuration)).
+- `vhostd` is a named volume, so per-host files survive restarts and live inside the volume rather than on the host filesystem.
 
 ## Homepage status card (nginx stub_status)
 
-The `nginx` service carries `homepage.*` labels so Homepage (https://gethomepage.dev) auto-discovers it as a card showing the proxy's Docker status and, when clicked, CPU/memory/network stats. `certgen` and `acme-companion` carry the same group (`Infrastructure`) with `homepage.icon` and `homepage.weight` labels, so all three proxy components appear as status/stats cards. It also sets:
+The `nginx` service carries `homepage.*` labels so Homepage (https://gethomepage.dev) auto-discovers it as a card showing the proxy's Docker status and, when clicked, CPU/memory/network stats. `certgen` (LAN variant) and `acme-companion` (public variant) carry the same group (`Infrastructure`) with `homepage.icon` and `homepage.weight` labels, so every component in the selected variant appears as a status/stats card. It also sets:
 
 ```
 homepage.siteMonitor: http://nginx:8080/stub_status
 ```
 
-which probes nginx for UP/DOWN + response time. That endpoint is **not enabled by default** — enable it like this:
+which probes nginx for UP/DOWN + response time. `stub_status.conf` is **baked into the built `nginx` image** (`nginx/docker/conf.d/stub_status.conf`) and enabled out of the box, so the card works with no manual step. To view the endpoint:
 
-1. Create `conf.d/stub_status.conf`:
+```bash
+docker compose exec nginx sh -c 'wget -qO- http://127.0.0.1:8080/stub_status'
+```
 
-   ```nginx
-   server {
-       listen 8080;
-       location = /stub_status {
-           stub_status;
-           allow 172.16.0.0/12;   # Docker networks (incl. web-proxy)
-           allow 192.168.0.0/16;  # LAN
-           deny all;
-           access_log off;
-       }
-   }
-   ```
-
-2. Mount it into the `nginx` service in `docker-compose.yml` and expose the internal port:
-
-   ```yaml
-   volumes:
-     - ./conf.d/stub_status.conf:/etc/nginx/conf.d/stub_status.conf:ro
-   expose:
-     - "8080"
-   ```
-
-3. Apply:
-
-   ```bash
-   docker compose up -d
-   ```
+To disable or change it, edit `nginx/docker/conf.d/stub_status.conf` and rebuild the `nginx` image (`docker compose -f docker-compose.yml -f docker-compose.lan.yml build nginx` + `up -d nginx`); the snippet is baked at build time, not bind-mounted.
 
 Notes:
 
-- The endpoint is internal-only (no host port mapping) and restricted to Docker/LAN subnets.
+- The endpoint is internal-only (no host port mapping) and restricted to Docker/LAN subnets by the `allow`/`deny` rules in the snippet.
 - The monitor URL assumes Homepage reaches the proxy over the proxy network (default `web-proxy`, hostname `nginx`). If your Homepage container isn't on that network, change `homepage.siteMonitor` to a host-reachable URL (e.g. `http://<host-ip>:8080/stub_status`).
-- Until the endpoint is enabled, the card shows the site monitor as DOWN; the Docker status and stats still work.
 
 ## Trust the cert locally (removes browser warning)
 
-The CA is self-signed, so browsers warn until you trust `./certs`-equivalent from the volume. Extract it first:
+Applies to the LAN variant (`certgen`). The CA is self-signed, so browsers warn until you trust the cert from the `certs` volume. Each opted-in host has its own cert, named after its exact `VIRTUAL_HOST`, so extract the one you need first:
 
 ```bash
-docker compose cp certgen:/certs/localhost.crt ./localhost.crt
-# replace localhost with your $BASE_DOMAIN
+docker compose cp certgen:/certs/app1.localhost.crt ./app1.localhost.crt
+# replace app1.localhost with the host you opted in via GEN_SELF_SIGNED_CERT
 ```
 
 Then trust:
 
 ```bash
 # Linux
-sudo cp localhost.crt /usr/local/share/ca-certificates/localhost.crt && sudo update-ca-certificates
+sudo cp app1.localhost.crt /usr/local/share/ca-certificates/app1.localhost.crt && sudo update-ca-certificates
 
 # macOS
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./localhost.crt
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./app1.localhost.crt
 
 # Windows
-# import ./localhost.crt into 'Trusted Root Certification Authorities' via certlm.msc
+# import ./app1.localhost.crt into 'Trusted Root Certification Authorities' via certlm.msc
 ```
 
 ## Regenerate certs
+
+Applies to the LAN variant (`certgen`).
 
 ```bash
 docker compose down -v  # drops the certs volume; omit -v to keep certs
@@ -201,46 +238,53 @@ docker compose down -v  # drops the certs volume; omit -v to keep certs
 docker compose up -d --build
 ```
 
-Changing `BASE_DOMAIN` generates a separate `<new-domain>.crt`/`.key` pair; old files remain in the volume.
+To regenerate a single host's cert, delete its files from the `certs` volume (e.g. `app1.localhost.crt`/`.key`) — `certgen` recreates it on the next reconcile or container event.
 
-To regenerate a single host's cert, delete its files from the `certs` volume (e.g. `sub1.localhost.crt`/`.key`) — `certgen` will recreate it within ~30s or on the next container event.
+## Cert removal and the legacy sweep
 
-## Standalone script (no Docker)
+`certgen` keeps a manifest of the currently desired hosts (`/certs/.certgen.manifest`). When a host stops opting in (`GEN_SELF_SIGNED_CERT` removed/falsy) or its container goes away, its cert pair is removed after `GEN_REMOVAL_GRACE` seconds. Removal is staged: the files are first renamed to `*.gone`, nginx-proxy is re-rendered/reloaded, and only then are the `.gone` files deleted. If the reload fails the `.gone` files are kept, so nginx is never left pointing at a cert that has already been deleted.
 
-`generate-wildcard-cert.sh` does the same thing on the host and writes nginx-proxy-compatible files (`<domain>.crt` + `<domain>.key`):
-
-```bash
-./generate-wildcard-cert.sh myapp.test
-./generate-wildcard-cert.sh myapp.test ./certs 825
-# usage: ./generate-wildcard-cert.sh [domain] [certs_dir] [days]
-```
-
-Refuses to overwrite existing files — delete them first to regenerate.
+On first run with an existing `certs` volume, `certgen` performs a one-time **legacy sweep**: it deletes the old `default.crt`/`default.key` fallback and any old self-signed wildcard certs (CN `*.…`, self-issued) that are no longer desired. Let's Encrypt (CA-signed) certs and exact per-host certs are never touched.
 
 ## Project structure
 
 ```
 .
-├── docker-compose.yml          # certgen (docker-gen sidecar) + nginx, shared certs volume, configurable proxy network (`NGINX_PROXY_NETWORK`, default `web-proxy`)
-├── .env                        # BASE_DOMAIN, CERT_DAYS, NGINX_PROXY_NETWORK
-├── vhost.d/                    # per-host nginx config (e.g. upload limits), mounted into nginx
-├── conf.d/
-│   └── global-upload-limit.conf # global client_max_body_size (default 10m)
-├── certgen/
-│   ├── Dockerfile              # alpine + openssl + docker-cli + docker-gen
-│   ├── README.md               # certgen docs
-│   └── docker/                 # build files copied into the image
-│       ├── entrypoint.sh       # bootstrap base cert, then run docker-gen (watch)
-│       ├── lib.sh              # shared cert helpers (gen_cert, ensure_default)
-│       ├── on-change.sh        # generate missing parent-domain certs + reload nginx
-│       └── certs.tmpl          # docker-gen template: hosts needing parent certs
-└── generate-wildcard-cert.sh   # host-side equivalent (Linux/macOS/WSL)
+├── docker-compose.yml          # base: nginx build + HTTP/80, shared volumes/network (variant-neutral)
+├── docker-compose.lan.yml      # override: HTTP + self-signed TLS, certgen (default)
+├── docker-compose.public.yml   # override: port 443 + acme-companion, mandatory Let's Encrypt TLS
+├── compose-lan.sh              # convenience wrapper: LAN variant, rebuild + recreate volumes by default
+├── env.example                 # template for .env (COMPOSE_FILE, versions, CERT_DAYS, LE_EMAIL)
+├── .env                        # local config (gitignored)
+├── nginx/
+│   ├── Dockerfile              # wraps upstream nginx-proxy; bakes in the conf.d snippets
+│   ├── README.md               # nginx image docs
+│   └── docker/conf.d/
+│       ├── global-upload-limit.conf # global client_max_body_size (default 10m), baked at build time
+│       └── stub_status.conf         # internal stub_status endpoint on :8080, baked at build time
+└── certgen/
+    ├── Dockerfile              # alpine + openssl + docker-cli + docker-gen
+    ├── README.md               # certgen docs
+    └── docker/                 # build files copied into the image
+        ├── entrypoint.sh       # one-shot render + legacy sweep + generate-only pass, then docker-gen watch
+        ├── lib.sh              # shared helpers (reconcile, gen_cert_host, legacy_sweep)
+        ├── on-change.sh        # thin reconcile wrapper called by docker-gen
+        └── certs.tmpl          # docker-gen template: desired opt-in host set
 ```
+
+Named volumes: `html`, `vhostd` (per-host nginx config at `/etc/nginx/vhost.d`), and `certs` (LAN/public TLS). The Docker socket is the only bind mount.
+
+## Security notes
+
+- The public variant uses `HTTPS_METHOD=redirect` (HTTP redirects to HTTPS). It is deliberately **not** `nohttp`: the ACME HTTP-01 challenge needs port 80 reachable, so blocking HTTP would break issuance.
+- `ENABLE_HTTP_ON_MISSING_CERT=false` means nginx never falls back to a self-signed cert in the public variant — a host without a valid cert is served over HTTP only. Combined with the omission of `certgen`, there is no trusted self-signed fallback.
+- HSTS is on by default in the public variant (`HSTS: max-age=31536000`) and is **sticky**: after the first HTTPS response, browsers refuse plain HTTP to the domain for a year. Get certs working before exposing a host publicly, and test with `LETSENCRYPT_TEST: "true"` (Let's Encrypt staging) first.
+- Downstream containers can override `HTTPS_METHOD` and `HSTS` per-vhost (nginx-proxy reads them from the proxied container's environment). A downstream service that sets e.g. `HTTPS_METHOD=nohttps` bypasses the public variant's TLS enforcement — review proxied containers before trusting the redirect/HSTS guarantees.
 
 ## Notes
 
 - No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`LETSENCRYPT_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
-- `nginx-proxy` and `acme-companion` use upstream images (no custom build) per spec rule 6: the image *is* the service here, no first-run seeding or config generation is needed.
-- Out of the box this is a self-signed local setup; the bundled `acme-companion` adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
-- Cert: RSA 2048, SHA-256, `CN=*.BASE_DOMAIN`, SANs `BASE_DOMAIN` + `*.BASE_DOMAIN`, `serverAuth` EKU.
-- `certgen` needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.
+- `nginx` wraps the upstream `nginxproxy/nginx-proxy` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` still uses the upstream image unchanged — per spec rule 6, the upstream image *is* the service.
+- The default LAN variant serves plain HTTP and self-signed HTTPS; the public variant adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
+- Cert: RSA 2048, SHA-256, self-signed, `CN=<host>`, SAN `DNS:<host>` (the exact opted-in `VIRTUAL_HOST`, no wildcard).
+- `certgen` (LAN variant) needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.

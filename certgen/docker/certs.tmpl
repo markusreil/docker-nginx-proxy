@@ -1,34 +1,34 @@
-{{- /* certs.tmpl - renders the list of parent-domain certs that need to exist
-     for the currently running containers' VIRTUAL_HOST values.
+{{- /* certs.tmpl - renders the desired self-signed cert host set.
 
-     For every vhost with 3+ labels (app.sub.domain.tld), nginx-proxy looks
-     for a cert named <parent>.crt (one level up: sub.domain.tld) and uses it
-     for ALL vhosts under that domain.  Here we emit the parent name once,
-     but only when that cert does not already exist, so docker-gen's notify
-     fires only when there is something to create.
+     Output format (consumed by on-change.sh -> lib.sh:read_desired):
+       # certgen-desired v1        <- sentinel, must be the first line
+       # containers-seen <N>       <- raw container count docker-gen saw
+       <host>                     <- one exact VIRTUAL_HOST per line
 
-     Containers opting into Let's Encrypt via ACME_HOST are skipped: their
-     certs are acme-companion's job (an empty ACME_HOST= is treated as
-     absent, matching acme-companion semantics).
+     Only containers that opt in via GEN_SELF_SIGNED_CERT (true/1/t,
+     case-insensitive) are considered.  Hosts are emitted verbatim (no
+     wildcards, no parent-domain collapsing) because nginx-proxy probes
+     /etc/nginx/certs/<host>.crt for the exact server name.  A hostname
+     whitelist (regexMatch) rejects empty values, leading `*`/`~`, `:`, `/`,
+     `..`, whitespace and other unsafe characters.  The containers-seen guard
+     lets read_desired reject partial/empty renders.  parseBool is
+     deliberately avoided: it errors on empty/unknown values and would abort
+     the render.
      */ -}}
-{{- $needed := dict -}}
+{{- $hosts := dict -}}
+{{- $valid := `^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$` -}}
 {{- range $c := $ -}}
-  {{- if and $c.Env.VIRTUAL_HOST (not $c.Env.ACME_HOST) -}}
+  {{- $gate := toLower (trim (default "" $c.Env.GEN_SELF_SIGNED_CERT)) -}}
+  {{- if or (eq $gate "true") (eq $gate "1") (eq $gate "t") -}}
     {{- range $host := splitList "," $c.Env.VIRTUAL_HOST -}}
       {{- $h := trim $host -}}
-      {{- if and (ne $h "") (not (hasPrefix "*" $h)) (not (hasPrefix "~" $h)) (not (contains ":" $h)) -}}
-        {{- $labels := splitList "." $h -}}
-        {{- if gt (len $labels) 2 -}}
-          {{- $parent := join "." (slice $labels 1) -}}
-          {{- if not (exists (printf "/certs/%s.crt" $parent)) -}}
-            {{- $_ := set $needed $parent "" -}}
-          {{- end -}}
-        {{- end -}}
+      {{- if regexMatch $valid $h -}}
+        {{- $_ := set $hosts $h "" -}}
       {{- end -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
-{{- $parents := sortAlpha (keys $needed) -}}
-{{- if gt (len $parents) 0 -}}
-{{- join "\n" $parents }}{{ "\n" -}}
-{{- end -}}
+# certgen-desired v1
+# containers-seen {{ len $ }}
+{{ range $h := sortAlpha (keys $hosts) }}{{ $h }}
+{{ end -}}

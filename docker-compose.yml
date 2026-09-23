@@ -1,39 +1,14 @@
 name: web-proxy
 services:
-  certgen:
-    build:
-      context: ./certgen
-      args:
-        BUILD_DATE: ${BUILD_DATE:-unknown}
-    restart: unless-stopped
-    env_file:
-      - .env
-    labels:
-      homepage.group: Infrastructure
-      homepage.name: certgen
-      homepage.icon: si-openssl
-      homepage.description: Wildcard TLS cert generation
-      homepage.weight: -90
-      homepage.showStats: true
-    environment:
-      BASE_DOMAIN: ${BASE_DOMAIN:?BASE_DOMAIN must be defined in .env}
-      CERT_DAYS: ${CERT_DAYS:?CERT_DAYS must be defined in .env}
-    volumes:
-      - certs:/certs
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    network_mode: none
-    healthcheck:
-      test: ["CMD-SHELL", "[ -f /certs/default.crt ] && [ -f /certs/default.key ]"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
   nginx:
-    image: nginxproxy/nginx-proxy:${NGINX_PROXY_VERSION:?NGINX_PROXY_VERSION must be defined in .env}
+    build:
+      context: ./nginx
+      args:
+        NGINX_PROXY_VERSION: ${NGINX_PROXY_VERSION:?NGINX_PROXY_VERSION must be defined in .env}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
     expose:
       - "8080"
     labels:
@@ -47,33 +22,8 @@ services:
       com.github.nginx-proxy.nginx: "true"
     volumes:
       - /var/run/docker.sock:/tmp/docker.sock:ro
-      - certs:/etc/nginx/certs:ro
       - html:/usr/share/nginx/html
-      - ./vhost.d:/etc/nginx/vhost.d:ro
-      - ./conf.d/global-upload-limit.conf:/etc/nginx/conf.d/global-upload-limit.conf:ro
-      - ./conf.d/stub_status.conf:/etc/nginx/conf.d/stub_status.conf:ro
-    networks:
-      - web-proxy
-    depends_on:
-      certgen:
-        condition: service_healthy
-  acme-companion:
-    image: nginxproxy/acme-companion:${ACME_COMPANION_VERSION:?ACME_COMPANION_VERSION must be defined in .env}
-    restart: unless-stopped
-    labels:
-      homepage.group: Infrastructure
-      homepage.name: acme-companion
-      homepage.icon: si-letsencrypt
-      homepage.description: Let's Encrypt cert issuance
-      homepage.weight: -80
-      homepage.showStats: true
-    environment:
-      DEFAULT_EMAIL: ${LE_EMAIL:-}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - certs:/etc/nginx/certs:rw
-      - html:/usr/share/nginx/html:rw
-      - acme:/etc/acme.sh
+      - vhostd:/etc/nginx/vhost.d
     networks:
       - web-proxy
 
@@ -82,6 +32,5 @@ networks:
     name: ${NGINX_PROXY_NETWORK:-web-proxy}
 
 volumes:
-  certs:
   html:
-  acme:
+  vhostd:

@@ -20,7 +20,7 @@ cp env.example .env
 docker compose config
 docker compose up -d --build
 
-# Public (mandatory TLS) — also set LE_EMAIL=you@example.com in .env
+# Public (mandatory TLS) — also set ACME_EMAIL=you@example.com in .env
 cp env.example .env
 # .env: COMPOSE_FILE=docker-compose.yml:docker-compose.public.yml
 docker compose config
@@ -97,17 +97,21 @@ services:
     environment:
       VIRTUAL_HOST: app1.localhost
       VIRTUAL_PORT: "3000"
-      GEN_SELF_SIGNED_CERT: "true"   # opt in to a self-signed cert for this host
+      # Declare BOTH TLS opt-ins so the same file works in every variant.
+      ACME_HOST: app1.localhost        # real cert (public variant)
+      GEN_SELF_SIGNED_CERT: "true"     # self-signed cert (LAN variant)
     networks:
       - web-proxy
 
 networks:
   web-proxy:
-    name: ${NGINX_PROXY_NETWORK:-web-proxy}
-    external: true
+    name: ${NGINX_PROXY_NETWORK:-web-proxy}   # must match the proxy cluster's value
+    external: true                            # created by the proxy; start it first
 ```
 
 With `GEN_SELF_SIGNED_CERT=true` the LAN variant serves both `http://app1.localhost` (plain) and `https://app1.localhost` (self-signed); expect a browser warning on HTTPS until you trust the cert, see below. Without the opt-in flag the host is served over HTTP only.
+
+Declare the **complete** contract — every applicable variable, including **both** TLS opt-ins when HTTPS is wanted. The proxy fails silently on an omission (no routing, or HTTP-only / no certificate), and declaring only one opt-in pins the service to one variant. Use the `ACME_*` spelling for every ACME variable; the legacy `LETSENCRYPT_*` spellings are accepted upstream but should not be used (the only exception is `LETSENCRYPT_TEST`).
 
 ## Configuration
 
@@ -119,11 +123,11 @@ With `GEN_SELF_SIGNED_CERT=true` the LAN variant serves both `http://app1.localh
 | `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
 | `NGINX_PROXY_VERSION` | `1.11` | Base-image tag used to build the `nginx` image (build arg; pinned per spec rule 1) |
 | `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned per spec rule 1) |
-| `LE_EMAIL` | *(empty)* | Contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
+| `ACME_EMAIL` | *(empty)* | ACME contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
 | `CERT_DAYS` | `825` | Self-signed cert validity in days. **Required** by the LAN variant. |
 | `GEN_REMOVAL_GRACE` | `30` | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
 
-`LE_EMAIL` is required by `docker-compose.public.yml`, and `CERT_DAYS` by `docker-compose.lan.yml` (`${VAR:?…}` fails fast if missing). `GEN_REMOVAL_GRACE` is optional (`${VAR:-default}`). The base variant needs none of them.
+`ACME_EMAIL` is required by `docker-compose.public.yml`, and `CERT_DAYS` by `docker-compose.lan.yml` (`${VAR:?…}` fails fast if missing). `GEN_REMOVAL_GRACE` is optional (`${VAR:-default}`). The base variant needs none of them.
 
 Downstream containers opt in to a self-signed cert with `GEN_SELF_SIGNED_CERT=true` (truthy: `true`, `1`, `t`, case-insensitive). It is set on the proxied container, not in this `.env`.
 
@@ -136,12 +140,13 @@ services:
   myapp:
     image: myapp:latest
     expose:
-      - "443"
+      - "3000"
     environment:
       VIRTUAL_HOST: app1.example.com     # routes + serves TLS
-      VIRTUAL_PORT: "443"
+      VIRTUAL_PORT: "3000"
       ACME_HOST: app1.example.com        # signals acme-companion: issue a real cert
-      ACME_EMAIL: you@example.com        # optional per-container contact (fallback: LE_EMAIL)
+      GEN_SELF_SIGNED_CERT: "true"       # inert here, keeps the service variant-agnostic
+      ACME_EMAIL: you@example.com        # optional per-container contact (fallback: cluster ACME_EMAIL)
       LETSENCRYPT_TEST: "true"           # optional: use Let's Encrypt staging first
     networks:
       - web-proxy
@@ -152,7 +157,7 @@ networks:
     external: true
 ```
 
-- `ACME_HOST` must match `VIRTUAL_HOST`. Omit `ACME_HOST` to skip issuance.
+- `ACME_HOST` must match `VIRTUAL_HOST`. Set it on every HTTPS service (alongside `GEN_SELF_SIGNED_CERT`); leave it unset only for a deliberately HTTP-only service, which then gets no real cert.
 - The public variant deliberately omits `certgen`, so there is **no trusted self-signed fallback**: until a real cert is issued, nginx serves only HTTP (`ENABLE_HTTP_ON_MISSING_CERT=false`). Make sure port 80 stays reachable so the HTTP-01 challenge can complete.
 - An empty `ACME_HOST=` placeholder is harmless: acme-companion treats it exactly like the variable being absent (the container is skipped, no cert is issued). This is fine as a template placeholder for services that may later opt in.
 - Requires HTTP port 80 to be reachable from the internet (HTTP-01 challenge). Try `LETSENCRYPT_TEST: "true"` (staging) before going live, then remove it.
@@ -254,7 +259,7 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
 ├── docker-compose.lan.yml      # override: HTTP + self-signed TLS, certgen (default)
 ├── docker-compose.public.yml   # override: port 443 + acme-companion, mandatory Let's Encrypt TLS
 ├── compose-lan.sh              # convenience wrapper: LAN variant, rebuild + recreate volumes by default
-├── env.example                 # template for .env (COMPOSE_FILE, versions, CERT_DAYS, LE_EMAIL)
+├── env.example                 # template for .env (COMPOSE_FILE, versions, CERT_DAYS, ACME_EMAIL)
 ├── .env                        # local config (gitignored)
 ├── nginx/
 │   ├── Dockerfile              # wraps upstream nginx-proxy; bakes in the conf.d snippets
@@ -283,7 +288,7 @@ Named volumes: `html`, `vhostd` (per-host nginx config at `/etc/nginx/vhost.d`),
 
 ## Notes
 
-- No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`LETSENCRYPT_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
+- No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`ACME_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
 - `nginx` wraps the upstream `nginxproxy/nginx-proxy` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` still uses the upstream image unchanged — per spec rule 6, the upstream image *is* the service.
 - The default LAN variant serves plain HTTP and self-signed HTTPS; the public variant adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, self-signed, `CN=<host>`, SAN `DNS:<host>` (the exact opted-in `VIRTUAL_HOST`, no wildcard).

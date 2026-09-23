@@ -21,7 +21,7 @@ services:
       homepage.weight: -80
       homepage.showStats: true
     environment:
-      DEFAULT_EMAIL: ${LE_EMAIL:?LE_EMAIL must be defined in .env for the public variant}
+      DEFAULT_EMAIL: ${ACME_EMAIL:?ACME_EMAIL must be defined in .env for the public variant}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - certs:/etc/nginx/certs:rw

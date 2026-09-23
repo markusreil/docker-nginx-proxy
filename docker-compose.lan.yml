@@ -1,0 +1,45 @@
+# LAN variant: plain HTTP plus self-signed TLS (certgen is always on).
+# Select with: COMPOSE_FILE=docker-compose.yml:docker-compose.lan.yml
+services:
+  nginx:
+    ports:
+      - "443:443"
+    environment:
+      HTTPS_METHOD: noredirect
+      ENABLE_HTTP_ON_MISSING_CERT: "true"
+    volumes:
+      - certs:/etc/nginx/certs:ro
+    depends_on:
+      certgen:
+        condition: service_healthy
+  certgen:
+    build:
+      context: ./certgen
+      args:
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    env_file:
+      - .env
+    labels:
+      homepage.group: Infrastructure
+      homepage.name: certgen
+      homepage.icon: si-openssl
+      homepage.description: Self-signed per-host TLS cert generation
+      homepage.weight: -90
+      homepage.showStats: true
+    environment:
+      CERT_DAYS: ${CERT_DAYS:?CERT_DAYS must be defined in .env}
+      GEN_REMOVAL_GRACE: ${GEN_REMOVAL_GRACE:-30}
+    volumes:
+      - certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    network_mode: none
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /certs/.certgen.ready ]"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  certs:

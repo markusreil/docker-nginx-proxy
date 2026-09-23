@@ -1,0 +1,35 @@
+# Internet variant: TLS is mandatory (real certs via Let's Encrypt).
+# Select with: COMPOSE_FILE=docker-compose.yml:docker-compose.public.yml
+services:
+  nginx:
+    ports:
+      - "443:443"
+    environment:
+      HTTPS_METHOD: redirect
+      ENABLE_HTTP_ON_MISSING_CERT: "false"
+      HSTS: max-age=31536000
+    volumes:
+      - certs:/etc/nginx/certs:ro
+  acme-companion:
+    image: nginxproxy/acme-companion:${ACME_COMPANION_VERSION:?ACME_COMPANION_VERSION must be defined in .env}
+    restart: unless-stopped
+    labels:
+      homepage.group: Infrastructure
+      homepage.name: acme-companion
+      homepage.icon: si-letsencrypt
+      homepage.description: Let's Encrypt cert issuance
+      homepage.weight: -80
+      homepage.showStats: true
+    environment:
+      DEFAULT_EMAIL: ${LE_EMAIL:?LE_EMAIL must be defined in .env for the public variant}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - certs:/etc/nginx/certs:rw
+      - html:/usr/share/nginx/html:rw
+      - acme:/etc/acme.sh
+    networks:
+      - web-proxy
+
+volumes:
+  certs:
+  acme:

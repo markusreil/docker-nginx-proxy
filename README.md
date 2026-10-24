@@ -245,6 +245,17 @@ docker compose up -d --build
 
 To regenerate a single host's cert, delete its files from the `certs` volume (e.g. `app1.localhost.crt`/`.key`) — `certgen` recreates it on the next reconcile or container event.
 
+## Local CA (`bin/create-ca.sh`)
+
+For trusted LAN HTTPS without per-host browser warnings, create a local CA once:
+
+```bash
+bin/create-ca.sh > ~/lan-ca.crt   # new CA (CN lan-ca, 10 years) into the certs volume
+bin/create-ca.sh --cn mylan --days 825 --force --out ~/mylan.crt  # custom CN/validity, overwrite
+```
+
+Host certs are then signed by the CA (leaf + chain in `<host>.crt`); install the saved `.crt` on phones, browsers, or `curl --cacert` clients. Existing host pairs stay self-signed until deleted — remove them from the volume to have `certgen` re-issue them CA-signed. Re-running `compose-lan.sh` without `KEEP_VOLUMES=1` drops the volume (and the CA); re-run `bin/create-ca.sh` afterwards.
+
 ## Cert removal and the legacy sweep
 
 `certgen` keeps a manifest of the currently desired hosts (`/certs/.certgen.manifest`). When a host stops opting in (`GEN_SELF_SIGNED_CERT` removed/falsy) or its container goes away, its cert pair is removed after `GEN_REMOVAL_GRACE` seconds. Removal is staged: the files are first renamed to `*.gone`, nginx-proxy is re-rendered/reloaded, and only then are the `.gone` files deleted. If the reload fails the `.gone` files are kept, so nginx is never left pointing at a cert that has already been deleted.
@@ -259,6 +270,7 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
 ├── docker-compose.lan.yml      # override: HTTP + self-signed TLS, certgen (default)
 ├── docker-compose.public.yml   # override: port 443 + acme-companion, mandatory Let's Encrypt TLS
 ├── compose-lan.sh              # convenience wrapper: LAN variant, rebuild + recreate volumes by default
+├── bin/create-ca.sh            # generate a local CA into the certs volume (trusted LAN HTTPS)
 ├── env.example                 # template for .env (COMPOSE_FILE, versions, CERT_DAYS, ACME_EMAIL)
 ├── .env                        # local config (gitignored)
 ├── nginx/

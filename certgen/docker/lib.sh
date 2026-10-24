@@ -12,6 +12,8 @@ set -eu
 : "${CERTS_DIR:=/certs}"
 : "${GEN_REMOVAL_GRACE:=30}"
 : "${LOCK:=/tmp/certgen.lock}"
+: "${CA_CRT:=$CERTS_DIR/ca.crt}"
+: "${CA_KEY:=$CERTS_DIR/ca.key}"
 
 MANIFEST="$CERTS_DIR/.certgen.manifest"
 READY="$CERTS_DIR/.certgen.ready"
@@ -77,18 +79,63 @@ reload_nginx() {
   return 0
 }
 
-# gen_cert_host <host> - idempotently create an exact self-signed cert for
-# <host> as <CERTS_DIR>/<host>.{crt,key} (CN=<host>, SAN DNS:<host>, no
-# wildcard). Returns 0 if the cert was created, 1 if the pair already existed
-# or generation failed. Failure is checked explicitly (not via `set -e`,
-# which is suppressed when the caller invokes this from an `if`).
+# ca_available - return 0 when an optional CA pair exists for signing host
+# certs. Both $CA_CRT and $CA_KEY (defaulting to $CERTS_DIR/ca.crt and
+# $CERTS_DIR/ca.key) must be readable files. When unavailable, callers fall
+# back to exact self-signed certs.
+ca_available() {
+  [ -f "$CA_CRT" ] && [ -r "$CA_CRT" ] && [ -f "$CA_KEY" ] && [ -r "$CA_KEY" ]
+}
+
+# gen_cert_host <host> - idempotently create an exact cert for <host> as
+# <CERTS_DIR>/<host>.{crt,key} (CN=<host>, SAN DNS:<host>, no wildcard).
+# When a CA pair is available (see ca_available), the host cert is signed by
+# that CA and the CA cert is appended so nginx serves the chain; otherwise a
+# self-signed cert is created. The reserved name `ca` is never generated so an
+# opted-in host cannot clobber the CA pair. Returns 0 if the cert was created,
+# 1 if the pair already existed or generation failed. Failure is checked
+# explicitly (not via `set -e`, which is suppressed when the caller invokes
+# this from an `if`).
 gen_cert_host() {
   host="$1"
   key="$CERTS_DIR/$host.key"
   crt="$CERTS_DIR/$host.crt"
 
+  if [ "$host" = "ca" ]; then
+    echo "ERROR: refusing to generate cert for reserved name 'ca'" >&2
+    return 1
+  fi
+
   if [ -f "$key" ] && [ -f "$crt" ]; then
     return 1
+  fi
+
+  if ca_available; then
+    echo "Generating CA-signed cert for $host ($CERT_DAYS days)..."
+    csr=$(mktemp)
+    leaf=$(mktemp)
+    if ! openssl req -newkey rsa:2048 -nodes -keyout "$key" -out "$csr" \
+         -subj "/CN=$host" -addext "subjectAltName=DNS:$host"; then
+      echo "ERROR: openssl req failed for $host" >&2
+      rm -f "$key" "$csr" "$leaf" "$crt"
+      return 1
+    fi
+    if ! openssl x509 -req -in "$csr" -CA "$CA_CRT" -CAkey "$CA_KEY" \
+         -CAcreateserial -days "$CERT_DAYS" -sha256 -out "$leaf" \
+         -extfile /dev/stdin <<EOF; then
+subjectAltName=DNS:$host
+EOF
+      echo "ERROR: openssl CA signing failed for $host" >&2
+      rm -f "$key" "$csr" "$leaf" "$crt"
+      return 1
+    fi
+    # Serve leaf + chain so clients trusting the CA verify without extras.
+    cat "$leaf" "$CA_CRT" > "$crt"
+    rm -f "$csr" "$leaf"
+    chmod 600 "$key" || return 1
+    chmod 644 "$crt" || return 1
+    echo "Done: $crt (signed by CA)"
+    return 0
   fi
 
   echo "Generating self-signed cert for $host ($CERT_DAYS days)..."
@@ -143,6 +190,8 @@ legacy_sweep() {
 
   for crt in "$CERTS_DIR"/*.crt; do
     [ -f "$crt" ] || continue
+    # Never touch the optional CA pair used for signing host certs.
+    [ "$crt" = "$CA_CRT" ] && continue
     base=$(basename "$crt" .crt)
 
     subj_full=$(openssl x509 -in "$crt" -noout -subject 2>/dev/null | sed 's/^subject=//') || continue
@@ -223,6 +272,8 @@ reconcile() {
         # or glob-expanded, and `staged` survives the loop.
         while IFS= read -r host; do
           [ -n "$host" ] || continue
+          # Reserved: never stage away the optional CA pair.
+          [ "$host" = "ca" ] && continue
           moved=0
           if [ -f "$CERTS_DIR/$host.crt" ]; then
             if mv -f "$CERTS_DIR/$host.crt" "$CERTS_DIR/$host.crt.gone" 2>/dev/null; then

@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - First version.
+- Optional local-CA signing for `certgen`: when `ca.crt`/`ca.key` are present
+  in the `certs` volume (paths overridable via `CA_CRT`/`CA_KEY`), host certs
+  are signed by that CA (leaf + chain in `<host>.crt`) instead of being
+  self-signed; otherwise the self-signed behavior is unchanged. The name `ca`
+  is reserved so an opted-in host cannot clobber the CA pair. New helper
+  `bin/create-ca.sh` generates a CA into the volume (cert goes to stdout or
+  `--out PATH`, nothing is written into the checkout).
 
 ### Changed
 

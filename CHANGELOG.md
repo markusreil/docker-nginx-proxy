@@ -16,7 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   self-signed; otherwise the self-signed behavior is unchanged. The name `ca`
   is reserved so an opted-in host cannot clobber the CA pair. New helper
   `bin/create-ca.sh` generates a CA into the volume (cert goes to stdout or
-  `--out PATH`, nothing is written into the checkout).
+  `--out PATH`, nothing is written into the checkout). Renamed to
+  `certgen-ca.crt`/`certgen-ca.key` (was `ca.crt`/`ca.key`): nginx-proxy
+  treats a `ca.crt` in its certs dir as a client-verification CA and switches
+  every vhost to mTLS (`ssl_verify_client` defaults to `on`); the new names
+  are ignored by the proxy. `bin/create-ca.sh --force` migrates an old-named
+  CA (installs the new names, removes the legacy pair).
 
 ### Changed
 

@@ -12,8 +12,8 @@ set -eu
 : "${CERTS_DIR:=/certs}"
 : "${GEN_REMOVAL_GRACE:=30}"
 : "${LOCK:=/tmp/certgen.lock}"
-: "${CA_CRT:=$CERTS_DIR/ca.crt}"
-: "${CA_KEY:=$CERTS_DIR/ca.key}"
+: "${CA_CRT:=$CERTS_DIR/certgen-ca.crt}"
+: "${CA_KEY:=$CERTS_DIR/certgen-ca.key}"
 
 MANIFEST="$CERTS_DIR/.certgen.manifest"
 READY="$CERTS_DIR/.certgen.ready"
@@ -80,14 +80,24 @@ reload_nginx() {
 }
 
 # ca_available - return 0 when an optional CA pair exists for signing host
-# certs. Both $CA_CRT and $CA_KEY (defaulting to $CERTS_DIR/ca.crt and
-# $CERTS_DIR/ca.key) must be readable files. When unavailable, callers fall
+# certs. Both $CA_CRT and $CA_KEY (defaulting to $CERTS_DIR/certgen-ca.crt
+# and $CERTS_DIR/certgen-ca.key) must be readable files. When unavailable, callers fall
 # back to exact self-signed certs.
 ca_available() {
   [ -f "$CA_CRT" ] && [ -r "$CA_CRT" ] && [ -f "$CA_KEY" ] && [ -r "$CA_KEY" ]
 }
 
-# gen_cert_host <host> - idempotently create an exact cert for <host> as
+# is_reserved_name <host> - return 0 when <host> must never get a generated
+# pair. `ca` is reserved because nginx-proxy treats /etc/nginx/certs/ca.crt
+# as a client-verification CA (ssl_verify_client defaults to on), so a host
+# literally named `ca` would switch every vhost to mTLS; the CA files'
+# own basenames are reserved so a host cannot clobber the CA pair.
+is_reserved_name() {
+  [ "$1" = "ca" ] && return 0
+  [ "$1" = "$(basename "$CA_CRT" .crt)" ] && return 0
+  [ "$1" = "$(basename "$CA_KEY" .key)" ] && return 0
+  return 1
+}
 # <CERTS_DIR>/<host>.{crt,key} (CN=<host>, SAN DNS:<host>, no wildcard).
 # When a CA pair is available (see ca_available), the host cert is signed by
 # that CA and the CA cert is appended so nginx serves the chain; otherwise a
@@ -101,8 +111,8 @@ gen_cert_host() {
   key="$CERTS_DIR/$host.key"
   crt="$CERTS_DIR/$host.crt"
 
-  if [ "$host" = "ca" ]; then
-    echo "ERROR: refusing to generate cert for reserved name 'ca'" >&2
+  if is_reserved_name "$host"; then
+    echo "ERROR: refusing to generate cert for reserved name '$host'" >&2
     return 1
   fi
 
@@ -272,8 +282,9 @@ reconcile() {
         # or glob-expanded, and `staged` survives the loop.
         while IFS= read -r host; do
           [ -n "$host" ] || continue
-          # Reserved: never stage away the optional CA pair.
-          [ "$host" = "ca" ] && continue
+          # Reserved: never stage away the optional CA pair (or a host that
+          # would collide with nginx-proxy's client-verification CA name).
+          is_reserved_name "$host" && continue
           moved=0
           if [ -f "$CERTS_DIR/$host.crt" ]; then
             if mv -f "$CERTS_DIR/$host.crt" "$CERTS_DIR/$host.crt.gone" 2>/dev/null; then

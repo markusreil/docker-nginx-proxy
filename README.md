@@ -254,7 +254,7 @@ bin/create-ca.sh > ~/lan-ca.crt   # new CA (CN lan-ca, 10 years) into the certs 
 bin/create-ca.sh --cn mylan --days 825 --force --out ~/mylan.crt  # custom CN/validity, overwrite
 ```
 
-Host certs are then signed by the CA (leaf + chain in `<host>.crt`); install the saved `.crt` on phones, browsers, or `curl --cacert` clients. Existing host pairs stay self-signed until deleted — remove them from the volume to have `certgen` re-issue them CA-signed. Re-running `compose-lan.sh` without `KEEP_VOLUMES=1` drops the volume (and the CA); re-run `bin/create-ca.sh` afterwards.
+Host certs are then signed by the CA (leaf + chain in `<host>.crt`); install the saved `.crt` on phones, browsers, or `curl --cacert` clients. The CA files are named `certgen-ca.crt`/`.key` on purpose: nginx-proxy treats a `ca.crt` in its certs dir as a client-verification CA and would demand client certs on every vhost — the `certgen-ca.*` names stay invisible to it. Existing host pairs stay self-signed until deleted — remove them from the volume to have `certgen` re-issue them CA-signed. Re-running `compose-lan.sh` without `KEEP_VOLUMES=1` drops the volume (and the CA); re-run `bin/create-ca.sh` afterwards. Upgrading from the earlier `ca.crt` naming: re-run `bin/create-ca.sh --force`, which installs the new names and removes the legacy `ca.crt`/`ca.key` (leaving them would re-enable client validation), then delete host pairs to re-issue them.
 
 ## Cert removal and the legacy sweep
 

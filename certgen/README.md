@@ -29,9 +29,9 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 | `GEN_SELF_SIGNED_CERT` | *(unset)*                | **Downstream contract:** set on a proxied container to opt in. Truthy (case-insensitive): `true`, `1`, `t`. Anything else is off. |
 | `CERT_DAYS`            | `825`                    | Validity of generated certs                                     |
 | `GEN_REMOVAL_GRACE`    | `30`                     | Seconds to wait before deleting a cert whose host stopped opting in |
-| `CERTS_DIR`            | `/certs`                 | Where certs are written (shared volume with nginx-proxy). Drop an optional CA pair at `<CERTS_DIR>/ca.crt` + `<CERTS_DIR>/ca.key` to have host certs signed by it instead of self-signed (see below) |
+| `CERTS_DIR`            | `/certs`                 | Where certs are written (shared volume with nginx-proxy). Drop an optional CA pair at `<CERTS_DIR>/certgen-ca.crt` + `<CERTS_DIR>/certgen-ca.key` to have host certs signed by it instead of self-signed (see below) |
 | `RENDER_FILE`          | `/tmp/certs-desired.txt` | Where docker-gen writes the desired host set                    |
-| `CA_CRT` / `CA_KEY`    | `<CERTS_DIR>/ca.crt` / `<CERTS_DIR>/ca.key` | Optional CA pair: when both files exist, host certs are signed by this CA (leaf + CA chain in `<host>.crt`); otherwise exact self-signed certs are created |
+| `CA_CRT` / `CA_KEY`    | `<CERTS_DIR>/certgen-ca.crt` / `<CERTS_DIR>/certgen-ca.key` | Optional CA pair: when both files exist, host certs are signed by this CA (leaf + CA chain in `<host>.crt`); otherwise exact self-signed certs are created |
 | `LOCK`                 | `/tmp/certgen.lock`      | flock file serialising reconciles                               |
 | `NGINX_CONTAINER`      | *(auto)*                 | Override the nginx container lookup for reloads                 |
 
@@ -69,16 +69,25 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 
 ## Optional CA signing
 
-Drop a CA certificate and key at `$CERTS_DIR/ca.crt` and `$CERTS_DIR/ca.key`
-(override the paths with `CA_CRT`/`CA_KEY`) — e.g. with `bin/create-ca.sh` from
-the repo root, which generates a CA inside the certgen image and installs it
-into the `certs` volume — and every host cert is signed by that CA instead of
+Drop a CA certificate and key at `$CERTS_DIR/certgen-ca.crt` and
+`$CERTS_DIR/certgen-ca.key` (override the paths with `CA_CRT`/`CA_KEY`) —
+e.g. with `bin/create-ca.sh` from the repo root, which generates a CA inside
+the certgen image and installs it into the `certs` volume — and every host
+cert is signed by that CA instead of being self-signed. The files are
+deliberately NOT named `ca.crt`/`ca.key`: nginx-proxy treats
+`/etc/nginx/certs/ca.crt` as a *client-verification* CA and would switch
+every vhost to mTLS (`ssl_verify_client` defaults to `on`); the
+`certgen-ca.*` names are ignored by the proxy, so no client validation is
+ever triggered. (If you ever want mTLS for a host, add a `<host>.ca.crt`
+per the nginx-proxy docs — that path is unaffected.)
 The signed leaf plus the CA cert are concatenated into `<host>.crt`, so nginx
 serves the chain and clients that trust the CA verify without extra setup.
 Remove the pair (or just the key) to fall back to exact self-signed certs for
-new hosts; existing certs are left untouched either way. The name `ca` is
-reserved: a `VIRTUAL_HOST` of `ca` is never generated or removed, so an
-opted-in host cannot clobber or evict the CA pair, and `legacy_sweep` skips it.
+new hosts; existing certs are left untouched either way. The name `ca` and the
+CA files' own basenames are reserved: such a `VIRTUAL_HOST` is never generated
+or removed, so an opted-in host can neither clobber the CA pair nor recreate
+nginx-proxy's client-verification trigger (`ca.crt`), and `legacy_sweep`
+skips the CA pair.
 
 ## Removal semantics
 

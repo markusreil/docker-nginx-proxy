@@ -1,11 +1,14 @@
 #!/bin/sh
 # bin/create-ca.sh - generate a new local CA and install it into the certs volume.
 #
-# Usage: bin/create-ca.sh [--cn NAME] [--days N] [--force] [--out PATH] [--out PATH]
+# Usage: bin/create-ca.sh [--cn NAME] [--days N] [--force] [--out PATH]
 #
 # Generates a CA key/cert *inside* the certgen image (no local openssl needed)
-# and writes ca.crt/ca.key into the `certs` named volume, where certgen picks
-# them up to sign host certs (see certgen/README.md "Optional CA signing").
+# and writes certgen-ca.crt/certgen-ca.key into the `certs` named volume,
+# where certgen picks them up to sign host certs (see certgen/README.md
+# "Optional CA signing"). The files are deliberately NOT named ca.crt/ca.key:
+# nginx-proxy treats /etc/nginx/certs/ca.crt as a client-verification CA and
+# would switch every vhost to mTLS (ssl_verify_client defaults to on).
 # Refuses to overwrite an existing CA unless --force is given. Nothing is ever
 # written into the repo checkout: the CA public cert goes to stdout (or --out)
 # so you can save it wherever your clients need it.
@@ -57,25 +60,28 @@ compose() {
 }
 
 if [ "$FORCE" -ne 1 ] && compose run --rm --no-deps --no-TTY --entrypoint sh certgen \
-    -c 'test -e /certs/ca.crt || test -e /certs/ca.key' >/dev/null 2>&1; then
+    -c 'test -e /certs/certgen-ca.crt || test -e /certs/certgen-ca.key' >/dev/null 2>&1; then
   echo "ERROR: a CA already exists in the certs volume (use --force to overwrite)" >&2
   exit 1
 fi
 
 compose run --rm --no-deps --no-TTY --build --entrypoint sh certgen -c \
   "openssl req -x509 -newkey rsa:4096 -sha256 -days '$DAYS' -nodes \
-     -keyout /certs/ca.key -out /certs/ca.crt -subj '/CN=$CN' \
+     -keyout /certs/certgen-ca.key -out /certs/certgen-ca.crt -subj '/CN=$CN' \
      -addext 'basicConstraints=critical,CA:TRUE' \
-   && chmod 600 /certs/ca.key && chmod 644 /certs/ca.crt \
-   && openssl x509 -in /certs/ca.crt -noout -subject -issuer -fingerprint -sha256"
+   && chmod 600 /certs/certgen-ca.key && chmod 644 /certs/certgen-ca.crt \
+   && rm -f /certs/ca.crt /certs/ca.key \
+   && openssl x509 -in /certs/certgen-ca.crt -noout -subject -issuer -fingerprint -sha256"
+# rm -f above removes a legacy ca.crt/ca.key from before the rename: any such
+# file makes nginx-proxy demand client certs, so it must not be left behind.
 
 # Print the CA public cert for trusting on clients (phones, browsers,
 # curl --cacert). Goes to stdout unless --out PATH was given.
 if [ -n "$OUT" ]; then
-  compose run --rm --no-deps --no-TTY --entrypoint cat certgen /certs/ca.crt > "$OUT"
+  compose run --rm --no-deps --no-TTY --entrypoint cat certgen /certs/certgen-ca.crt > "$OUT"
   echo "Wrote $OUT - install it as a trusted CA on your clients."
 else
-  compose run --rm --no-deps --no-TTY --entrypoint cat certgen /certs/ca.crt
+  compose run --rm --no-deps --no-TTY --entrypoint cat certgen /certs/certgen-ca.crt
 fi
 
 if [ "$FORCE" -eq 1 ]; then

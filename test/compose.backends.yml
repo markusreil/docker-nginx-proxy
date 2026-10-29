@@ -1,0 +1,50 @@
+x-backend: &backend
+  image: alpine:3.24
+  command:
+    - sh
+    - -c
+    - >-
+      printf 'HTTP/1.1 200 OK\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s'
+      "$${#BODY}" "$$BODY" > /resp.txt && exec nc -lk -p "$$PORT" -e cat /resp.txt
+
+services:
+  hello-plain:
+    <<: *backend
+    container_name: proxytest-hello-plain
+    expose:
+      - "80"
+    environment:
+      BODY: hello-plain
+      PORT: "80"
+      VIRTUAL_HOST: robotplain.localhost
+      VIRTUAL_PORT: "80"
+
+  hello-tls:
+    <<: *backend
+    container_name: proxytest-hello-tls
+    expose:
+      - "80"
+    environment:
+      BODY: hello-tls
+      PORT: "80"
+      VIRTUAL_HOST: robottls.localhost
+      VIRTUAL_PORT: "80"
+      GEN_SELF_SIGNED_CERT: "true"
+      ACME_HOST: robottls.localhost
+
+  hello-altport:
+    <<: *backend
+    container_name: proxytest-hello-altport
+    expose:
+      - "8080"
+    environment:
+      BODY: hello-altport
+      PORT: "8080"
+      VIRTUAL_HOST: robotalt.localhost
+      VIRTUAL_PORT: "8080"
+      GEN_SELF_SIGNED_CERT: "true"
+
+networks:
+  default:
+    name: ${NGINX_PROXY_NETWORK:?set NGINX_PROXY_NETWORK}
+    external: true

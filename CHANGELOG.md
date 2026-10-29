@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GEN_REMOVAL_GRACE` default is now 1 day (`86400`, was `30`): short cluster
   stop/starts keep their certs instead of deleting and re-minting them
   (which retriggered the browser warning).
+- New `maxbody` sidecar (wired into the base compose file, runs in every
+  variant): writes one `/etc/nginx/vhost.d/<host>` file per downstream
+  container that sets `MAX_BODY_SIZE` (`client_max_body_size <size>;`) and
+  reloads nginx; removal is prompt with fallback to the global `10m`.
+  Invalid sizes are ignored with a warning.
 
 ### Deprecated
 

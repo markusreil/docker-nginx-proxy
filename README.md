@@ -175,8 +175,23 @@ docker compose -f docker-compose.yml -f docker-compose.lan.yml build nginx
 docker compose -f docker-compose.yml -f docker-compose.lan.yml up -d nginx
 ```
 
-To raise the limit **per host**, write a file named after the `VIRTUAL_HOST`
-into the `vhostd` named volume (mounted at `/etc/nginx/vhost.d`) and reload:
+To raise the limit **per host**, set `MAX_BODY_SIZE` on the downstream
+container — the `maxbody` sidecar (wired into the base compose file, runs in
+every variant) writes `/etc/nginx/vhost.d/<host>` with
+`client_max_body_size <size>;` and reloads nginx, no manual step needed:
+
+```yaml
+services:
+  myapp:
+    environment:
+      VIRTUAL_HOST: app1.localhost
+      MAX_BODY_SIZE: 50m   # nginx size syntax: 512k, 50m, 1g, or bare bytes
+```
+
+Any other value is ignored with a warning and the global default applies;
+removing `MAX_BODY_SIZE` (or the container) removes the file again. See
+`maxbody/README.md` for the contract. To set a limit without the sidecar,
+write the file manually and reload:
 
 ```bash
 docker compose exec nginx sh -c 'printf "client_max_body_size 50m;\n" > /etc/nginx/vhost.d/app1.localhost'
@@ -266,7 +281,7 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
 
 ```
 .
-├── docker-compose.yml          # base: nginx build + HTTP/80, shared volumes/network (variant-neutral)
+├── docker-compose.yml          # base: nginx + maxbody builds, HTTP/80, shared volumes/network (variant-neutral)
 ├── docker-compose.lan.yml      # override: HTTP + self-signed TLS, certgen (default)
 ├── docker-compose.public.yml   # override: port 443 + acme-companion, mandatory Let's Encrypt TLS
 ├── compose-lan.sh              # convenience wrapper: LAN variant, rebuild + recreate volumes by default
@@ -287,6 +302,21 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
         ├── lib.sh              # shared helpers (reconcile, gen_cert_host, legacy_sweep)
         ├── on-change.sh        # thin reconcile wrapper called by docker-gen
         └── certs.tmpl          # docker-gen template: desired opt-in host set
+├── maxbody/
+│   ├── Dockerfile              # alpine + docker-cli + docker-gen
+│   ├── README.md               # maxbody docs
+│   └── docker/                 # build files copied into the image
+│       ├── entrypoint.sh       # one-shot render + reconcile, then docker-gen watch
+│       ├── lib.sh              # shared helpers (read_desired, reconcile, reload_nginx)
+│       ├── on-change.sh        # thin reconcile wrapper called by docker-gen
+│       └── maxbody.tmpl        # docker-gen template: desired host/size set
+└── test/
+    ├── proxy.robot             # robot suite: http/https/cert/no-cert matrix (isolated stack)
+    ├── maxbody.robot           # robot suite: MAX_BODY_SIZE upload limits (isolated stack)
+    ├── compose.proxy-test.yml  # test override: remapped host ports (18080/18443)
+    ├── compose.backends.yml    # proxy-suite backends (http-only, tls, alt-port)
+    ├── compose.maxbody-backends.yml  # maxbody-suite backends (50m, default, bogus)
+    └── README.md               # how to run the suites
 ```
 
 Named volumes: `html`, `vhostd` (per-host nginx config at `/etc/nginx/vhost.d`), and `certs` (LAN/public TLS). The Docker socket is the only bind mount.

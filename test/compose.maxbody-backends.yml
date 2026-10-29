@@ -1,0 +1,49 @@
+x-backend: &backend
+  image: alpine:3.24
+  command:
+    - sh
+    - -c
+    - >-
+      printf 'HTTP/1.1 200 OK\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s'
+      "$${#BODY}" "$$BODY" > /resp.txt && exec nc -lk -p "$$PORT" -e cat /resp.txt
+
+services:
+  hello-big:
+    <<: *backend
+    container_name: proxytest2-hello-big
+    expose:
+      - "80"
+    environment:
+      BODY: hello-big
+      PORT: "80"
+      VIRTUAL_HOST: robotbig.localhost
+      VIRTUAL_PORT: "80"
+      MAX_BODY_SIZE: 50m
+
+  hello-default:
+    <<: *backend
+    container_name: proxytest2-hello-default
+    expose:
+      - "80"
+    environment:
+      BODY: hello-default
+      PORT: "80"
+      VIRTUAL_HOST: robotdef.localhost
+      VIRTUAL_PORT: "80"
+
+  hello-bogus:
+    <<: *backend
+    container_name: proxytest2-hello-bogus
+    expose:
+      - "80"
+    environment:
+      BODY: hello-bogus
+      PORT: "80"
+      VIRTUAL_HOST: robotbogus.localhost
+      VIRTUAL_PORT: "80"
+      MAX_BODY_SIZE: not-a-size
+
+networks:
+  default:
+    name: ${NGINX_PROXY_NETWORK:?set NGINX_PROXY_NETWORK}
+    external: true

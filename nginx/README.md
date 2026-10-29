@@ -53,8 +53,10 @@ rebuild** (`docker compose ... build nginx` + `up -d`). To change or disable the
 ## Per-host config (`vhostd`)
 
 Per-host nginx snippets live in the `vhostd` **named volume**, mounted at
-`/etc/nginx/vhost.d`. Drop a file named after the `VIRTUAL_HOST` (e.g.
-`app1.localhost`) into it and reload:
+`/etc/nginx/vhost.d`. Upload limits are managed automatically: set
+`MAX_BODY_SIZE` on the downstream container and the `maxbody` sidecar writes
+the file for you (see `../maxbody/README.md`). For anything else, drop a file
+named after the `VIRTUAL_HOST` (e.g. `app1.localhost`) into it and reload:
 
 ```sh
 docker compose exec nginx sh -c 'printf "client_max_body_size 50m;\n" > /etc/nginx/vhost.d/app1.localhost'

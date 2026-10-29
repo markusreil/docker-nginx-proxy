@@ -1,0 +1,35 @@
+{{- /* maxbody.tmpl - renders the desired per-vhost upload limits.
+
+     Output format (consumed by on-change.sh -> lib.sh:read_desired):
+       # maxbody-desired v1        <- sentinel, must be the first line
+       # containers-seen <N>       <- raw container count docker-gen saw
+       <host> <size>               <- one line per opted-in VIRTUAL_HOST
+       # invalid <host> <value>    <- skipped entries, for warning logs
+
+     Only containers with a valid MAX_BODY_SIZE are considered. The size must
+     match nginx size syntax (digits with optional k/m/g suffix); anything
+     else is reported as an invalid comment line and ignored. Hosts use the
+     same whitelist as certgen (exact VIRTUAL_HOST, no wildcards/regex).
+     */ -}}
+{{- $hosts := dict -}}
+{{- $valid := `^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$` -}}
+{{- $size := `^[0-9]+[kKmMgG]?$` -}}
+# maxbody-desired v1
+# containers-seen {{ len $ }}
+{{- range $c := $ -}}
+  {{- $raw := trim (default "" $c.Env.MAX_BODY_SIZE) -}}
+  {{- if $raw -}}
+    {{- range $host := splitList "," $c.Env.VIRTUAL_HOST -}}
+      {{- $h := trim $host -}}
+      {{- if regexMatch $valid $h -}}
+        {{- if regexMatch $size $raw -}}
+          {{- $_ := set $hosts $h $raw -}}
+        {{- else }}
+# invalid {{ $h }} {{ $raw }}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end }}
+{{ range $h := sortAlpha (keys $hosts) }}{{ $h }} {{ get $hosts $h }}
+{{ end -}}

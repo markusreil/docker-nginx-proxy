@@ -26,6 +26,23 @@ services:
       - vhostd:/etc/nginx/vhost.d
     networks:
       - web-proxy
+  maxbody:
+    build:
+      context: ./maxbody
+      args:
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    labels:
+      homepage.group: Infrastructure
+      homepage.name: maxbody
+      homepage.icon: si-nginx
+      homepage.description: Per-vhost upload limit writer
+      homepage.weight: -85
+      homepage.showStats: true
+    volumes:
+      - vhostd:/vhostd
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    network_mode: none
 
 networks:
   web-proxy:

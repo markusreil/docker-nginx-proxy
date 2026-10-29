@@ -14,11 +14,11 @@ with this project's `conf.d` snippets baked in at build time.
 
 ## Why wrap the upstream image
 
-The upstream image *is* the service (spec rule 6), so most of it is used as-is.
+The upstream image *is* the service, so most of it is used as-is.
 Wrapping it only exists so the `conf.d` snippets live in the image instead of
 being bind-mounted from the host: config stays portable and immutable, and the
 container filesystem is self-contained. `BASE_IMAGE` is therefore hardcoded
-(with no tag) per spec rule 1 — the pinned tag is recorded separately in the
+(with no tag) — the pinned tag is recorded separately in the
 `NGINX_PROXY_VERSION` build arg and `ENV NGINX_PROXY_VERSION`.
 
 ## No custom entrypoint
@@ -26,7 +26,7 @@ container filesystem is self-contained. `BASE_IMAGE` is therefore hardcoded
 There is **no** custom `entrypoint.sh`. The upstream entrypoint is preserved
 (and generates `/etc/nginx/conf.d/default.conf` at runtime); the baked snippets
 sit alongside that generated file. Nothing needs first-run seeding, so the
-entrypoint requirements of spec rules 8–9 do not apply — no seeding and no
+entrypoint requirements (first-run seeding, privilege drop) do not apply — no seeding and no
 `PUID`/`PGID` privilege drop; the upstream image manages its own user.
 
 ## Build args
@@ -36,7 +36,7 @@ entrypoint requirements of spec rules 8–9 do not apply — no seeding and no
 | `NGINX_PROXY_VERSION` | yes      | Upstream base-image tag (`nginxproxy/nginx-proxy:<tag>`)       |
 | `BUILD_DATE`          | no       | Build timestamp recorded as `ENV BUILD_DATE` (default `unknown`) |
 
-`BASE_IMAGE` is not a build arg — it is a hardcoded `ENV` (spec rule 1).
+`BASE_IMAGE` is not a build arg — it is a hardcoded `ENV`.
 
 Build (via compose):
 

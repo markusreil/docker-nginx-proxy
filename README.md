@@ -121,8 +121,8 @@ Declare the **complete** contract — every applicable variable, including **bot
 | --- | --- | --- |
 | `COMPOSE_FILE` | `docker-compose.yml:docker-compose.lan.yml` | Which compose files make up the stack (see [Variants](#variants)) |
 | `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
-| `NGINX_PROXY_VERSION` | `1.11` | Base-image tag used to build the `nginx` image (build arg; pinned per spec rule 1) |
-| `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned per spec rule 1) |
+| `NGINX_PROXY_VERSION` | `1.11` | Base-image tag used to build the `nginx` image (build arg; pinned) |
+| `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned) |
 | `ACME_EMAIL` | *(empty)* | ACME contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
 | `CERT_DAYS` | `825` | Self-signed cert validity in days. **Required** by the LAN variant. |
 | `GEN_REMOVAL_GRACE` | `86400` (1 day) | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
@@ -331,7 +331,7 @@ Named volumes: `html`, `vhostd` (per-host nginx config at `/etc/nginx/vhost.d`),
 ## Notes
 
 - No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`ACME_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
-- `nginx` wraps the upstream `nginxproxy/nginx-proxy` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` still uses the upstream image unchanged — per spec rule 6, the upstream image *is* the service.
+- `nginx` wraps the upstream `nginxproxy/nginx-proxy` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` still uses the upstream image unchanged — the upstream image *is* the service.
 - The default LAN variant serves plain HTTP and self-signed HTTPS; the public variant adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, self-signed, `CN=<host>`, SAN `DNS:<host>` (the exact opted-in `VIRTUAL_HOST`, no wildcard).
 - `certgen` (LAN variant) needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.

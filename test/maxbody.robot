@@ -1,5 +1,5 @@
 *** Settings ***
-Documentation     Upload limits: MAX_BODY_SIZE opt-in, global default, invalid values.
+Documentation     Upload limits: NGINX_MAX_BODY_SIZE opt-in, global default, invalid values.
 ...               Isolated stack on remapped host ports; leaves no residue.
 Library           Process
 Library           OperatingSystem

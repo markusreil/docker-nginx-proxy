@@ -6,7 +6,7 @@
        <host> <size>               <- one line per opted-in VIRTUAL_HOST
        # invalid <host> <value>    <- skipped entries, for warning logs
 
-     Only containers with a valid MAX_BODY_SIZE are considered. The size must
+     Only containers with a valid NGINX_MAX_BODY_SIZE are considered. The size must
      match nginx size syntax (digits with optional k/m/g suffix); anything
      else is reported as an invalid comment line and ignored. Hosts use the
      same whitelist as certgen (exact VIRTUAL_HOST, no wildcards/regex).
@@ -17,7 +17,7 @@
 # maxbody-desired v1
 # containers-seen {{ len $ }}
 {{- range $c := $ -}}
-  {{- $raw := trim (default "" $c.Env.MAX_BODY_SIZE) -}}
+  {{- $raw := trim (default "" $c.Env.NGINX_MAX_BODY_SIZE) -}}
   {{- if $raw -}}
     {{- range $host := splitList "," $c.Env.VIRTUAL_HOST -}}
       {{- $h := trim $host -}}

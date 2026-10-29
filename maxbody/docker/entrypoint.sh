@@ -1,6 +1,6 @@
 #!/bin/sh
 # maxbody: writes one /vhostd/<host> file per downstream container that sets
-# MAX_BODY_SIZE, containing `client_max_body_size <size>;`. Only
+# NGINX_MAX_BODY_SIZE, containing `client_max_body_size <size>;`. Only
 # manifest-tracked files are managed, so manual vhost.d entries are safe.
 set -eu
 

@@ -27,9 +27,9 @@ Set on the proxied container:
 
 | Variable       | Required | Description                                              |
 | -------------- | -------- | -------------------------------------------------------- |
-| `MAX_BODY_SIZE`| no       | Upload limit in nginx size syntax (`50m`, `1g`, `512k`, or bare bytes). Must match `^[0-9]+[kKmMgG]?$`; anything else is ignored with a warning. Unset means the global `10m` default. |
+| `NGINX_MAX_BODY_SIZE`| no       | Upload limit in nginx size syntax (`50m`, `1g`, `512k`, or bare bytes). Must match `^[0-9]+[kKmMgG]?$`; anything else is ignored with a warning. Unset means the global `10m` default. |
 
-`MAX_BODY_SIZE` applies to every `VIRTUAL_HOST` on that container.
+`NGINX_MAX_BODY_SIZE` applies to every `VIRTUAL_HOST` on that container.
 
 ## How it works
 
@@ -43,7 +43,7 @@ Set on the proxied container:
 3. `maxbody.tmpl` renders the desired set: one `<host> <size>` line per
    opted-in `VIRTUAL_HOST`, preceded by a `# maxbody-desired v1` sentinel
    and a `# containers-seen <N>` line. Containers with an invalid
-   `MAX_BODY_SIZE` render as `# invalid <host> <value>` comment lines so
+   `NGINX_MAX_BODY_SIZE` render as `# invalid <host> <value>` comment lines so
    the reconciler can log them.
 4. `reconcile` validates the render (`read_desired` rejects a missing
    sentinel or `containers-seen <= 0`), writes a `<host>` file only when

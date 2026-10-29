@@ -39,7 +39,7 @@ The base `docker-compose.yml` builds `nginx` from `./nginx` (wrapping upstream `
 Any container on the proxy network with `VIRTUAL_HOST` set gets routed. In the LAN variant:
 
 - `nginx` mounts the `certs` volume at `/etc/nginx/certs:ro` and terminates TLS automatically for hosts that have a cert (no per-host config needed).
-- `certgen` watches container events via docker-gen and reconciles the `certs` volume against the opted-in host set. When a host stops opting in (or its container goes away), its cert pair is deleted after a grace period (`GEN_REMOVAL_GRACE`, default 30s). nginx-proxy is forced to re-render and reload after any generate/remove so the change takes effect immediately.
+- `certgen` watches container events via docker-gen and reconciles the `certs` volume against the opted-in host set. When a host stops opting in (or its container goes away), its cert pair is deleted after a grace period (`GEN_REMOVAL_GRACE`, default 1 day). nginx-proxy is forced to re-render and reload after any generate/remove so the change takes effect immediately.
 
 ## Multi-level hosts (`app.sub1.localhost`)
 
@@ -125,7 +125,7 @@ Declare the **complete** contract — every applicable variable, including **bot
 | `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned per spec rule 1) |
 | `ACME_EMAIL` | *(empty)* | ACME contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
 | `CERT_DAYS` | `825` | Self-signed cert validity in days. **Required** by the LAN variant. |
-| `GEN_REMOVAL_GRACE` | `30` | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
+| `GEN_REMOVAL_GRACE` | `86400` (1 day) | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
 
 `ACME_EMAIL` is required by `docker-compose.public.yml`, and `CERT_DAYS` by `docker-compose.lan.yml` (`${VAR:?…}` fails fast if missing). `GEN_REMOVAL_GRACE` is optional (`${VAR:-default}`). The base variant needs none of them.
 

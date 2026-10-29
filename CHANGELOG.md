@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standardized the docs on the `ACME_*` env spelling for every ACME variable;
   the `LETSENCRYPT_*` aliases are deprecated and must not be used. The staging
   toggle stays `LETSENCRYPT_TEST` (it has no `ACME_` spelling).
+- `GEN_REMOVAL_GRACE` default is now 1 day (`86400`, was `30`): short cluster
+  stop/starts keep their certs instead of deleting and re-minting them
+  (which retriggered the browser warning).
 
 ### Deprecated
 

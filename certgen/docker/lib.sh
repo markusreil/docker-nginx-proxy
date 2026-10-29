@@ -10,7 +10,7 @@ set -eu
 
 : "${CERT_DAYS:=825}"
 : "${CERTS_DIR:=/certs}"
-: "${GEN_REMOVAL_GRACE:=30}"
+: "${GEN_REMOVAL_GRACE:=86400}"
 : "${LOCK:=/tmp/certgen.lock}"
 : "${CA_CRT:=$CERTS_DIR/certgen-ca.crt}"
 : "${CA_KEY:=$CERTS_DIR/certgen-ca.key}"

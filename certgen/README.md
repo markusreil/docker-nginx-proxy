@@ -28,7 +28,7 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 | ---------------------- | ------------------------ | --------------------------------------------------------------- |
 | `GEN_SELF_SIGNED_CERT` | *(unset)*                | **Downstream contract:** set on a proxied container to opt in. Truthy (case-insensitive): `true`, `1`, `t`. Anything else is off. |
 | `CERT_DAYS`            | `825`                    | Validity of generated certs                                     |
-| `GEN_REMOVAL_GRACE`    | `30`                     | Seconds to wait before deleting a cert whose host stopped opting in |
+| `GEN_REMOVAL_GRACE`    | `86400` (1 day)        | Seconds to wait before deleting a cert whose host stopped opting in |
 | `CERTS_DIR`            | `/certs`                 | Where certs are written (shared volume with nginx-proxy). Drop an optional CA pair at `<CERTS_DIR>/certgen-ca.crt` + `<CERTS_DIR>/certgen-ca.key` to have host certs signed by it instead of self-signed (see below) |
 | `RENDER_FILE`          | `/tmp/certs-desired.txt` | Where docker-gen writes the desired host set                    |
 | `CA_CRT` / `CA_KEY`    | `<CERTS_DIR>/certgen-ca.crt` / `<CERTS_DIR>/certgen-ca.key` | Optional CA pair: when both files exist, host certs are signed by this CA (leaf + CA chain in `<host>.crt`); otherwise exact self-signed certs are created |

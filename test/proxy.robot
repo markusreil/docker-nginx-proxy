@@ -84,6 +84,17 @@ HTTPS Serves Insecure
     Should Be Equal As Integers    ${r.rc}    0    msg=https failed: ${r.stderr}
     Should Contain    ${r.stdout}    ${body}
 
+HTTP Redirects To HTTPS
+    [Arguments]    ${host}
+    ${r}=    Curl    -o    /dev/null    -w    \%{http_code} \%{redirect_url}
+    ...    --resolve    ${host}:${HTTP_PORT}:127.0.0.1    http://${host}:${HTTP_PORT}/
+    Should Be Equal As Integers    ${r.rc}    0    msg=http redirect failed: ${r.stderr}
+    Should Contain    ${r.stdout}    301
+    # Redirect target carries no port: the proxy sees its own 443, not the
+    # test stack's remapped host port (production publishes 443:443, so the
+    # bare https:// URL is exactly right there).
+    Should Contain    ${r.stdout}    https://${host}/
+
 *** Test Cases ***
 HTTP-Only Vhost Serves Plain HTTP
     HTTP Serves    robotplain.localhost    hello-plain
@@ -92,8 +103,8 @@ HTTP-Only Vhost Has No Usable HTTPS
     ${r}=    Curl    --resolve    robotplain.localhost:${HTTPS_PORT}:127.0.0.1    https://robotplain.localhost:${HTTPS_PORT}/
     Should Not Be Equal As Integers    ${r.rc}    0
 
-Self-Signed Vhost Serves HTTP And HTTPS
-    HTTP Serves    robottls.localhost    hello-tls
+Cert Vhost Redirects HTTP To HTTPS
+    HTTP Redirects To HTTPS    robottls.localhost
     HTTPS Serves Insecure    robottls.localhost    hello-tls
 
 Self-Signed Cert Fails Verification Without Trust
@@ -108,7 +119,7 @@ Self-Signed Cert Identity Matches Vhost
     Should Contain    ${r.stdout}    robottls.localhost
 
 Alt-Port Backend Is Routed
-    HTTP Serves    robotalt.localhost    hello-altport
+    HTTP Redirects To HTTPS    robotalt.localhost
     HTTPS Serves Insecure    robotalt.localhost    hello-altport
 
 Pending Grace Does Not Stall New Certs

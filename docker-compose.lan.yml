@@ -5,7 +5,10 @@ services:
     ports:
       - "443:443"
     environment:
-      HTTPS_METHOD: noredirect
+      HTTPS_METHOD: redirect
+      # No HSTS on LAN: browsers must never pin HTTPS for .localhost names.
+      # Redirect still only fires when a cert exists for the host; without one
+      # ENABLE_HTTP_ON_MISSING_CERT downgrades to plain HTTP (see README).
       ENABLE_HTTP_ON_MISSING_CERT: "true"
     volumes:
       - certs:/etc/nginx/certs:ro

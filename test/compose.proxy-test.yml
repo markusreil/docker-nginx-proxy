@@ -2,7 +2,9 @@
 # real proxy (which owns host 80/443). Applied on top of the LAN variant:
 #   docker compose -p proxytest -f ../docker-compose.yml \
 #       -f ../docker-compose.lan.yml -f compose.proxy-test.yml up -d
-# LAN uses HTTPS_METHOD=noredirect, so plain host-port remapping is faithful.
+# LAN uses HTTPS_METHOD=redirect with non-standard external ports, so the
+# redirect target carries the mapped port (https://host:18443/) — faithful
+# to production behavior on 443.
 services:
   nginx:
     ports: !override

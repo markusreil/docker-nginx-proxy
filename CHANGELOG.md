@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- LAN variant now sets `HTTPS_METHOD=redirect`: plain-HTTP requests to a
+  vhost with a cert get a 301 to HTTPS (no HSTS, so browsers never pin it).
+  Vhosts without a cert are unaffected — `ENABLE_HTTP_ON_MISSING_CERT=true`
+  still serves them over plain HTTP instead of redirecting to a dead HTTPS
+  endpoint.
+
 ### Fixed
 
 - `certgen` removal grace no longer stalls all cert generation: `reconcile`

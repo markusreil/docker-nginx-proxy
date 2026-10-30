@@ -39,7 +39,7 @@ The base `docker-compose.yml` builds `nginx` from `./nginx` (wrapping upstream `
 Any container on the proxy network with `VIRTUAL_HOST` set gets routed. In the LAN variant:
 
 - `nginx` mounts the `certs` volume at `/etc/nginx/certs:ro` and terminates TLS automatically for hosts that have a cert (no per-host config needed).
-- `certgen` watches container events via docker-gen and reconciles the `certs` volume against the opted-in host set. When a host stops opting in (or its container goes away), its cert pair is deleted after a grace period (`GEN_REMOVAL_GRACE`, default 1 day). nginx-proxy is forced to re-render and reload after any generate/remove so the change takes effect immediately.
+- `certgen` watches container events via docker-gen and reconciles the `certs` volume against the opted-in host set. When a host stops opting in (or its container goes away), its cert is kept serving for a per-host grace period (`GEN_REMOVAL_GRACE`, default 1 day) and only then removed; a host that re-opts in during its grace window re-uses its still-present cert. Generation never waits on pending removals, so one stale host can't stall certs for the others. nginx-proxy is forced to re-render and reload after any generate/remove so the change takes effect immediately.
 
 ## Multi-level hosts (`app.sub1.localhost`)
 
@@ -311,10 +311,11 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
 │       ├── on-change.sh        # thin reconcile wrapper called by docker-gen
 │       └── maxbody.tmpl        # docker-gen template: desired host/size set
 └── test/
-    ├── proxy.robot             # robot suite: http/https/cert/no-cert matrix (isolated stack)
+    ├── proxy.robot             # robot suite: http/https/cert/no-cert matrix + removal-grace regression (isolated stack)
+    ├── certgen.robot           # robot unit suite for certgen/docker/lib.sh (isolated CERTS_DIR, stubbed reload)
     ├── maxbody.robot           # robot suite: NGINX_MAX_BODY_SIZE upload limits (isolated stack)
     ├── compose.proxy-test.yml  # test override: remapped host ports (18080/18443)
-    ├── compose.backends.yml    # proxy-suite backends (http-only, tls, alt-port)
+    ├── compose.backends.yml    # proxy-suite backends (http-only, tls, alt-port, grace)
     ├── compose.maxbody-backends.yml  # maxbody-suite backends (50m, default, bogus)
     └── README.md               # how to run the suites
 ```

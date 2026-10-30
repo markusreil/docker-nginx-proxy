@@ -64,7 +64,9 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 6. `on-change.sh` -> `reconcile` validates the render (`read_desired` rejects a
    missing sentinel or `containers-seen <= 0`, guarding against partial/empty
    renders), generates any missing `<host>.crt`/`.key` pair, and — in `full`
-   mode — removes certs whose host is no longer desired. It then forces
+   mode — stages away certs whose host has been undesired for longer than
+   `GEN_REMOVAL_GRACE` (per-host timestamps; re-opted-in hosts re-use their
+   existing cert). It then forces
    nginx-proxy to re-render and reload so changes take effect immediately.
 
 ## Optional CA signing
@@ -92,19 +94,25 @@ skips the CA pair.
 ## Removal semantics
 
 `reconcile` keeps a manifest at `/certs/.certgen.manifest` listing the desired
-hosts. In `full` mode a host that disappeared from the desired set is removed
-after `GEN_REMOVAL_GRACE` seconds (re-checked against a fresh render, so a host
-that re-opts in during the grace period is kept). Removal is staged atomically:
-the pair is renamed to `<host>.crt.gone`/`<host>.key.gone`, nginx-proxy is
-re-rendered and reloaded, and only then are the `.gone` files deleted. If the
-reload fails, the `.gone` files are left in place and a warning is printed, so
-nginx is never left referencing a cert that has already been deleted.
+hosts plus any hosts still inside their grace window, and per-host grace
+timestamps at `/certs/.certgen.pending` (`<epoch> <host>`: when the host first
+went stale). In `full` mode a host that disappeared from the desired set keeps
+its cert until `<epoch> + GEN_REMOVAL_GRACE` has passed — re-checked against the
+current render on every run, so a host that re-opts in during the grace period
+simply drops its pending entry and re-uses its still-present cert. Expired hosts
+are staged atomically: the pair is renamed to `<host>.crt.gone`/`<host>.key.gone`,
+nginx-proxy is re-rendered and reloaded, and only then are the `.gone` files
+deleted. If the reload fails, the `.gone` files are left in place and a warning
+is printed, so nginx is never left referencing a cert that has already been
+deleted. No reconcile ever sleeps while holding the lock, so one stale host can
+never stall generation for the others.
 
 ## State files (in `$CERTS_DIR`)
 
 | File                    | Purpose                                                       |
 | ----------------------- | ------------------------------------------------------------- |
-| `.certgen.manifest`     | Tracked host set: `full` prunes it to the desired set, `initial` unions it (never shrinks) |
+| `.certgen.manifest`     | Tracked host set: `full` prunes it to the desired set plus grace-pending hosts, `initial` unions it (never shrinks) |
+| `.certgen.pending`      | Per-host grace timestamps (`<epoch> <host>`): when each stale host first went undesired |
 | `.certgen.ready`        | Healthcheck marker; touched after each successful reconcile   |
 | `.certgen.legacy-swept` | Marks that the one-time legacy sweep has run                  |
 | `<host>.crt` / `.key`   | Exact self-signed cert pair for an opted-in host              |

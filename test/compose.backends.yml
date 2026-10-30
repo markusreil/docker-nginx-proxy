@@ -32,6 +32,36 @@ services:
       GEN_SELF_SIGNED_CERT: "true"
       ACME_HOST: robottls.localhost
 
+  hello-grace:
+    <<: *backend
+    container_name: proxytest-hello-grace
+    expose:
+      - "80"
+    environment:
+      BODY: hello-grace
+      PORT: "80"
+      VIRTUAL_HOST: robotgrace.localhost
+      VIRTUAL_PORT: "80"
+      GEN_SELF_SIGNED_CERT: "true"
+      ACME_HOST: robotgrace.localhost
+
+  # Started on demand by the "Pending Grace Does Not Stall New Certs" test
+  # (profiles keep it out of the Suite Setup `up -d`).
+  hello-stall:
+    <<: *backend
+    container_name: proxytest-hello-stall
+    profiles:
+      - stalltest
+    expose:
+      - "80"
+    environment:
+      BODY: hello-stall
+      PORT: "80"
+      VIRTUAL_HOST: robotstall.localhost
+      VIRTUAL_PORT: "80"
+      GEN_SELF_SIGNED_CERT: "true"
+      ACME_HOST: robotstall.localhost
+
   hello-altport:
     <<: *backend
     container_name: proxytest-hello-altport

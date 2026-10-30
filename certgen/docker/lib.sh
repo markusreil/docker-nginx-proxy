@@ -16,6 +16,12 @@ set -eu
 : "${CA_KEY:=$CERTS_DIR/certgen-ca.key}"
 
 MANIFEST="$CERTS_DIR/.certgen.manifest"
+# PENDING tracks per-host removal grace: lines "<epoch> <host>" marking when
+# a host first went stale (in manifest but no longer desired). A stale host
+# keeps serving its existing cert until <epoch> + GEN_REMOVAL_GRACE has passed.
+# The file is only ever read/written inside reconcile (under flock); reconcile
+# never sleeps, so generation is never blocked behind a pending removal.
+PENDING="$CERTS_DIR/.certgen.pending"
 READY="$CERTS_DIR/.certgen.ready"
 RENDER_FILE="${RENDER_FILE:-/tmp/certs-desired.txt}"
 LEGACY_SWEPT="$CERTS_DIR/.certgen.legacy-swept"
@@ -259,32 +265,26 @@ reconcile() {
     fi
 
     if [ -s "$stale_file" ]; then
-      sleep "$GEN_REMOVAL_GRACE"
-      if desired2=$(read_desired "$render_file"); then
-        desired="$desired2"
-        _write_list "$desired_file" "$desired"
-        if [ -s "$desired_file" ]; then
-          remaining=$(mktemp)
-          grep -vxF -f "$desired_file" "$stale_file" > "$remaining" 2>/dev/null || true
-          mv -f "$remaining" "$stale_file"
-        fi
-
-        # Re-admitted during the grace window: generate any newly-desired host
-        # that still lacks a pair so it is served promptly.
-        while IFS= read -r host; do
-          [ -n "$host" ] || continue
-          if gen_cert_host "$host"; then
-            generated=$((generated + 1))
-          fi
-        done < "$desired_file"
-
-        # Line-by-line staging so a host with spaces/globs is never word-split
-        # or glob-expanded, and `staged` survives the loop.
-        while IFS= read -r host; do
-          [ -n "$host" ] || continue
-          # Reserved: never stage away the optional CA pair (or a host that
-          # would collide with nginx-proxy's client-verification CA name).
-          is_reserved_name "$host" && continue
+      # Per-host grace without sleeping: a host that just went stale is
+      # recorded in PENDING with the current time and keeps its cert; only a
+      # host still stale after GEN_REMOVAL_GRACE seconds is staged away. A
+      # host that re-opts in disappears from the stale set, so its pending
+      # entry is dropped and its still-present cert is simply re-used.
+      now=$(date +%s)
+      pending_tmp=$(mktemp)
+      : > "$pending_tmp"
+      # Line-by-line staging so a host with spaces/globs is never word-split
+      # or glob-expanded, and `staged` survives the loop.
+      while IFS= read -r host; do
+        [ -n "$host" ] || continue
+        # Reserved: never stage away the optional CA pair (or a host that
+        # would collide with nginx-proxy's client-verification CA name).
+        is_reserved_name "$host" && continue
+        first_seen=$(awk -v h="$host" '$2 == h { print $1; exit }' "$PENDING" 2>/dev/null || true)
+        case "$first_seen" in
+          ''|*[!0-9]*) first_seen="$now" ;;
+        esac
+        if [ "$((now - first_seen))" -ge "$GEN_REMOVAL_GRACE" ]; then
           moved=0
           if [ -f "$CERTS_DIR/$host.crt" ]; then
             if mv -f "$CERTS_DIR/$host.crt" "$CERTS_DIR/$host.crt.gone" 2>/dev/null; then
@@ -300,10 +300,13 @@ reconcile() {
             echo "Staging removal of cert for $host (no longer opted in)"
             staged=$((staged + 1))
           fi
-        done < "$stale_file"
-      else
-        echo "WARNING: render became invalid during grace period; skipping removals" >&2
-      fi
+        else
+          printf '%s %s\n' "$first_seen" "$host" >> "$pending_tmp"
+        fi
+      done < "$stale_file"
+      mv -f "$pending_tmp" "$PENDING"
+    else
+      rm -f "$PENDING"
     fi
     rm -f "$stale_file"
   fi
@@ -312,7 +315,13 @@ reconcile() {
   # with the previous manifest) so startup-generated certs stay tracked.
   manifest_tmp="$MANIFEST.tmp.$$"
   if [ "$mode" = "full" ]; then
-    _write_list "$manifest_tmp" "$desired"
+    # Hosts still inside their grace window stay in the manifest so they are
+    # recognised as stale (not new) on the next pass and their certs kept.
+    if [ -f "$PENDING" ]; then
+      { printf '%s\n' "$desired"; sed 's/^[^ ]* //;s/^ *//' "$PENDING"; } | sed '/^[[:space:]]*$/d' | sort -u > "$manifest_tmp"
+    else
+      _write_list "$manifest_tmp" "$desired"
+    fi
   elif [ -f "$MANIFEST" ]; then
     cat "$MANIFEST" "$desired_file" | sort -u | sed '/^[[:space:]]*$/d' > "$manifest_tmp"
   else

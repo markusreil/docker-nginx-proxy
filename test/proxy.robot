@@ -25,7 +25,7 @@ Compose Env
     ...    NGINX_PROXY_NETWORK=${NETWORK}
     ...    NGINX_PROXY_VERSION=1.11
     ...    CERT_DAYS=825
-    ...    GEN_REMOVAL_GRACE=86400
+    ...    GEN_REMOVAL_GRACE=60
     ...    COMPOSE_IGNORE_ORPHANS=True
     RETURN    ${env}
 
@@ -43,6 +43,7 @@ Start Test Stack
     ${r}=    Run Compose    ${BACKEND_COMPOSE} up -d --build
     Should Be Equal As Integers    ${r.rc}    0    msg=backends up failed
     Wait Until Keyword Succeeds    3 min    5 sec    Cert Exists For    robottls.localhost
+    Wait Until Keyword Succeeds    3 min    5 sec    Cert Exists For    robotgrace.localhost
     Wait Until Keyword Succeeds    3 min    5 sec    HTTP Serves    robotplain.localhost    hello-plain
 
 Stop Test Stack
@@ -58,6 +59,13 @@ Cert Exists For
     ...    docker exec ${PROJECT}-certgen-1 test -f /certs/${host}.crt
     ...    shell=True    timeout=30s
     Should Be Equal As Integers    ${r.rc}    0    msg=no cert for ${host} yet
+
+Cert Gone For
+    [Arguments]    ${host}
+    ${r}=    Run Process
+    ...    docker exec ${PROJECT}-certgen-1 test ! -f /certs/${host}.crt
+    ...    shell=True    timeout=30s
+    Should Be Equal As Integers    ${r.rc}    0    msg=cert for ${host} still present
 
 Curl
     [Arguments]    @{args}
@@ -102,3 +110,22 @@ Self-Signed Cert Identity Matches Vhost
 Alt-Port Backend Is Routed
     HTTP Serves    robotalt.localhost    hello-altport
     HTTPS Serves Insecure    robotalt.localhost    hello-altport
+
+Pending Grace Does Not Stall New Certs
+    [Documentation]    Stopping an opted-in backend must not block cert
+    ...    generation for other hosts: reconcile never sleeps on the lock.
+    ...    (Regression test for the wedged docker-gen watch loop that
+    ...    surfaced as SSL_ERROR_UNRECOGNIZED_NAME_ALERT.)
+    Run Process    docker stop proxytest-hello-grace    shell=True    timeout=60s
+    ${r}=    Run Compose    ${BACKEND_COMPOSE} up -d hello-stall
+    Should Be Equal As Integers    ${r.rc}    0    msg=stall backend failed: ${r.stdout}
+    Wait Until Keyword Succeeds    3 min    5 sec    Cert Exists For    robotstall.localhost
+    HTTPS Serves Insecure    robotstall.localhost    hello-stall
+    [Teardown]    Run Process    docker rm -f proxytest-hello-stall    shell=True    timeout=60s
+
+Stale Cert Is Removed After Grace
+    [Documentation]    A host that stays undesired past GEN_REMOVAL_GRACE
+    ...    (60s in this stack) loses its cert; its HTTPS vhost stops working.
+    Wait Until Keyword Succeeds    6 min    10 sec    Cert Gone For    robotgrace.localhost
+    ${r}=    Curl    --resolve    robotgrace.localhost:${HTTPS_PORT}:127.0.0.1    https://robotgrace.localhost:${HTTPS_PORT}/
+    Should Not Be Equal As Integers    ${r.rc}    0

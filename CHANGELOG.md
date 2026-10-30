@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `certgen` removal grace no longer stalls all cert generation: `reconcile`
+  previously `sleep`ed `GEN_REMOVAL_GRACE` (default 1 day) while holding the
+  lock whenever any host stopped opting in, wedging the `docker-gen` watch
+  loop so newly (re)started containers got no cert (surfaced as
+  `SSL_ERROR_UNRECOGNIZED_NAME_ALERT`). Grace is now per-host timestamps in
+  `certs/.certgen.pending`; reconciles never sleep, stale hosts keep serving
+  their existing cert until their own grace expires, and hosts that re-opt
+  in re-use their cert. Note: hosts already stale at upgrade get a fresh
+  grace window starting at the first reconcile after redeploy.
+
 ### Added
 
 - First version.

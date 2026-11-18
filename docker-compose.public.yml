@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     labels:
       homepage.group: Infrastructure
-      homepage.name: acme-companion
+      homepage.name: proxy-acme
       homepage.icon: si-letsencrypt
       homepage.description: Let's Encrypt cert issuance
       homepage.weight: -80

@@ -25,7 +25,7 @@ services:
       - .env
     labels:
       homepage.group: Infrastructure
-      homepage.name: certgen
+      homepage.name: proxy-certgen
       homepage.icon: si-openssl
       homepage.description: Self-signed per-host TLS cert generation
       homepage.weight: -90

@@ -11,6 +11,12 @@ services:
       # No CDN/LB in front of this proxy: don't trust X-Forwarded-For from
       # clients (prevents IP spoofing in logs and IP-based rules).
       TRUST_DOWNSTREAM_PROXY: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/stub_status"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
     ports:
       - "80:80"
     expose:
@@ -43,6 +49,12 @@ services:
       homepage.description: Per-vhost upload limit writer
       homepage.weight: -85
       homepage.showStats: true
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /vhostd/.maxbody.ready ]"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
     volumes:
       - vhostd:/vhostd
       - /var/run/docker.sock:/var/run/docker.sock:ro

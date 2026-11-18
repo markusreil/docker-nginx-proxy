@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Healthchecks on `nginx` (local `stub_status` probe), `maxbody`
+  (`.maxbody.ready` marker, mirroring `certgen`) and `acme-companion`
+  (`letsencrypt_service` renewal loop). `certgen` already had one.
+- `stub_status` endpoint now allows `127.0.0.1` (was: only Docker/LAN
+  ranges), so the local healthcheck probe can reach it.
+
 ### Changed
 
 - `nginx` sets `TRUST_DOWNSTREAM_PROXY=false`: nothing sits in front of this

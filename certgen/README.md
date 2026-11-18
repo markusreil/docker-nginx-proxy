@@ -16,7 +16,7 @@ The `Dockerfile` sits at the top of `certgen/` (the compose build context is
 
 | File              | Purpose                                                        |
 | ----------------- | -------------------------------------------------------------- |
-| `Dockerfile`      | alpine:3.24 + openssl + docker-cli + docker-gen 0.17.2 binary  |
+| `Dockerfile`      | alpine:3.24 + openssl + docker-cli + docker-gen from `mreil/docker-gen-hardened` |
 | `docker/entrypoint.sh`   | One-shot render, legacy sweep, generate-only pass, then docker-gen watch |
 | `docker/lib.sh`          | Shared helpers: `gen_cert_host`, `read_desired`, `legacy_sweep`, `reconcile`, `reload_nginx` |
 | `docker/on-change.sh`    | Thin wrapper: `reconcile "$RENDER_FILE" "${1:-full}"`          |

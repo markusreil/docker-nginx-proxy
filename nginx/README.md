@@ -1,8 +1,10 @@
 # nginx
 
-The reverse proxy. A thin build wrapping the upstream
-[`nginxproxy/nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) image,
-with this project's `conf.d` snippets baked in at build time.
+The reverse proxy. A thin build wrapping the hardened
+[`mreil/nginx-proxy-hardened`](https://github.com/markusreil/nginx-proxy) image
+(an Alpine rebuild of [`nginxproxy/nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy)
+with `docker-gen`/`forego` compiled from source), with this project's `conf.d`
+snippets baked in at build time.
 
 ## Files
 
@@ -12,29 +14,33 @@ with this project's `conf.d` snippets baked in at build time.
 | `docker/conf.d/global-upload-limit.conf`  | Global `client_max_body_size` (default `10m`)             |
 | `docker/conf.d/stub_status.conf`          | Internal `stub_status` endpoint on `:8080` for Homepage   |
 
-## Why wrap the upstream image
+## Why wrap the base image
 
-The upstream image *is* the service, so most of it is used as-is.
+The base image *is* the service, so most of it is used as-is.
 Wrapping it only exists so the `conf.d` snippets live in the image instead of
 being bind-mounted from the host: config stays portable and immutable, and the
 container filesystem is self-contained. `BASE_IMAGE` is therefore hardcoded
-(with no tag) — the pinned tag is recorded separately in the
+(with no tag) — the tag is recorded separately in the
 `NGINX_PROXY_VERSION` build arg and `ENV NGINX_PROXY_VERSION`.
 
 ## No custom entrypoint
 
-There is **no** custom `entrypoint.sh`. The upstream entrypoint is preserved
+There is **no** custom `entrypoint.sh`. The base entrypoint is preserved
 (and generates `/etc/nginx/conf.d/default.conf` at runtime); the baked snippets
 sit alongside that generated file. Nothing needs first-run seeding, so the
 entrypoint requirements (first-run seeding, privilege drop) do not apply — no seeding and no
-`PUID`/`PGID` privilege drop; the upstream image manages its own user.
+`PUID`/`PGID` privilege drop; the base image manages its own user.
 
 ## Build args
 
 | Arg                   | Required | Purpose                                                        |
 | --------------------- | -------- | -------------------------------------------------------------- |
-| `NGINX_PROXY_VERSION` | yes      | Upstream base-image tag (`nginxproxy/nginx-proxy:<tag>`)       |
+| `NGINX_PROXY_VERSION` | no       | Base-image tag (`mreil/nginx-proxy-hardened:<tag>`, default `alpine` floating = latest hardened build) |
 | `BUILD_DATE`          | no       | Build timestamp recorded as `ENV BUILD_DATE` (default `unknown`) |
+
+The base image itself already compiles
+`docker-gen`/`forego` from source with a current Go toolchain (Trivy reports
+0 vulnerabilities for it), so this build only adds the `conf.d` snippets.
 
 `BASE_IMAGE` is not a build arg — it is a hardcoded `ENV`.
 

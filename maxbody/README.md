@@ -15,7 +15,7 @@ the `docker/` subfolder.
 
 | File                  | Purpose                                                      |
 | --------------------- | ------------------------------------------------------------ |
-| `Dockerfile`          | alpine:3.24 + docker-cli + docker-gen 0.17.2 binary          |
+| `Dockerfile`          | alpine:3.24 + docker-cli + docker-gen from `mreil/docker-gen-hardened` |
 | `docker/entrypoint.sh`| One-shot render, reconcile, then docker-gen watch            |
 | `docker/lib.sh`       | Shared helpers: `read_desired`, `reconcile`, `reload_nginx`   |
 | `docker/on-change.sh` | Thin wrapper: `reconcile "$RENDER_FILE"`                     |

@@ -21,7 +21,7 @@ ${BIG_FILE}           ${OUT}/big-12m.bin
 Compose Env
     ${env}=    Create Dictionary
     ...    NGINX_PROXY_NETWORK=${NETWORK}
-    ...    NGINX_PROXY_VERSION=1.11
+    ...    NGINX_PROXY_VERSION=alpine
     ...    CERT_DAYS=825
     ...    GEN_REMOVAL_GRACE=86400
     ...    COMPOSE_IGNORE_ORPHANS=True

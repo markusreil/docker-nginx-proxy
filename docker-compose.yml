@@ -4,7 +4,7 @@ services:
     build:
       context: ./nginx
       args:
-        NGINX_PROXY_VERSION: ${NGINX_PROXY_VERSION:?NGINX_PROXY_VERSION must be defined in .env}
+        NGINX_PROXY_VERSION: ${NGINX_PROXY_VERSION:-alpine}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     ports:

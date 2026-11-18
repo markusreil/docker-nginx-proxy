@@ -1,6 +1,6 @@
 # docker-nginx-proxy
 
-Reverse proxy with automatic TLS, split into composable variants. Spins up [`nginxproxy/nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) plus, depending on the selected variant, a self-signed, opt-in `certgen` sidecar or [`nginxproxy/acme-companion`](https://github.com/nginx-proxy/acme-companion) for real Let's Encrypt certs.
+Reverse proxy with automatic TLS, split into composable variants. Spins up the hardened [`mreil/nginx-proxy-hardened`](https://github.com/markusreil/nginx-proxy) image plus, depending on the selected variant, a self-signed, opt-in `certgen` sidecar or [`nginxproxy/acme-companion`](https://github.com/nginx-proxy/acme-companion) for real Let's Encrypt certs.
 
 ## Variants
 
@@ -31,7 +31,7 @@ To switch variants, edit `COMPOSE_FILE` in `.env` and re-run `docker compose con
 
 ## How it works
 
-The base `docker-compose.yml` builds `nginx` from `./nginx` (wrapping upstream `nginxproxy/nginx-proxy:${NGINX_PROXY_VERSION}`) and runs it on port 80, joining the proxy network (default `web-proxy`, configurable via `NGINX_PROXY_NETWORK`). The two `conf.d` snippets (global upload limit and `stub_status`) are baked into the image at build time; only the Docker socket remains a host bind mount, while `html` and the `vhostd` config volume are named volumes. Variant overrides add TLS:
+The base `docker-compose.yml` builds `nginx` from `./nginx` (wrapping hardened `mreil/nginx-proxy-hardened:${NGINX_PROXY_VERSION}`, default tag `alpine` tracking the latest hardened build) and runs it on port 80, joining the proxy network (default `web-proxy`, configurable via `NGINX_PROXY_NETWORK`). The two `conf.d` snippets (global upload limit and `stub_status`) are baked into the image at build time; only the Docker socket remains a host bind mount, while `html` and the `vhostd` config volume are named volumes. Variant overrides add TLS:
 
 1. **LAN (default)** — `docker-compose.lan.yml` publishes port 443, mounts a shared `certs` volume, sets `HTTPS_METHOD=redirect` (HTTP redirects to HTTPS whenever a cert exists for the host; hosts without one are still served over plain HTTP via `ENABLE_HTTP_ON_MISSING_CERT=true`) and runs `certgen` (built from `./certgen`, Alpine + OpenSSL + docker-gen), which is always on. `certgen` generates a self-signed cert **only** for proxied containers that opt in via `GEN_SELF_SIGNED_CERT` (truthy: `true`, `1`, `t`). The cert identity is the exact `VIRTUAL_HOST` value, written as `<host>.crt`/`.key` with `CN=<host>` and SAN `DNS:<host>` — nginx-proxy probes `/etc/nginx/certs/<host>.crt`, so one host maps to one cert pair. Hosts that don't opt in are served over HTTP only. To silence the browser warning, trust the cert via [Trust the cert locally](#trust-the-cert-locally-removes-browser-warning).
 2. **Public** — `docker-compose.public.yml` publishes port 443, mounts the shared `certs` volume and runs `acme-companion`, which obtains real Let's Encrypt certs for containers that opt in via `ACME_HOST`. It deliberately omits `certgen`, so there is no trusted self-signed fallback.
@@ -121,8 +121,8 @@ Declare the **complete** contract — every applicable variable, including **bot
 | --- | --- | --- |
 | `COMPOSE_FILE` | `docker-compose.yml:docker-compose.lan.yml` | Which compose files make up the stack (see [Variants](#variants)) |
 | `NGINX_PROXY_NETWORK` | `web-proxy` | Docker network name shared between the proxy and proxied containers |
-| `NGINX_PROXY_VERSION` | `1.11` | Base-image tag used to build the `nginx` image (build arg; pinned) |
-| `ACME_COMPANION_VERSION` | `2.8` | Upstream acme-companion image tag (pinned) |
+| `NGINX_PROXY_VERSION` | `alpine` | Base-image tag of the hardened `nginx` image (build arg; `alpine` floats with the latest hardened build, or pin a `*-alpine-hardened.*` tag) |
+| `ACME_COMPANION_VERSION` | `2.8` | Base-image tag used to build the `acme-companion` image (build arg; patched at build time like `nginx`) |
 | `ACME_EMAIL` | *(empty)* | ACME contact email for Let's Encrypt (becomes the companion's `DEFAULT_EMAIL`). **Required** when `COMPOSE_FILE` selects the public variant; config fails fast if empty. |
 | `CERT_DAYS` | `825` | Self-signed cert validity in days. **Required** by the LAN variant. |
 | `GEN_REMOVAL_GRACE` | `86400` (1 day) | Seconds to wait before deleting a cert whose host stopped opting in (LAN variant) |
@@ -285,6 +285,8 @@ On first run with an existing `certs` volume, `certgen` performs a one-time **le
 ├── docker-compose.lan.yml      # override: HTTP + self-signed TLS, certgen (default)
 ├── docker-compose.public.yml   # override: port 443 + acme-companion, mandatory Let's Encrypt TLS
 ├── compose-lan.sh              # convenience wrapper: LAN variant, rebuild + recreate volumes by default
+├── acme/
+│   ├── Dockerfile              # wraps upstream acme-companion; apk upgrade + hardened docker-gen
 ├── bin/create-ca.sh            # generate a local CA into the certs volume (trusted LAN HTTPS)
 ├── env.example                 # template for .env (COMPOSE_FILE, versions, CERT_DAYS, ACME_EMAIL)
 ├── .env                        # local config (gitignored)
@@ -327,12 +329,13 @@ Named volumes: `html`, `vhostd` (per-host nginx config at `/etc/nginx/vhost.d`),
 - The public variant uses `HTTPS_METHOD=redirect` (HTTP redirects to HTTPS). It is deliberately **not** `nohttp`: the ACME HTTP-01 challenge needs port 80 reachable, so blocking HTTP would break issuance.
 - `ENABLE_HTTP_ON_MISSING_CERT=false` means nginx never falls back to a self-signed cert in the public variant — a host without a valid cert is served over HTTP only. Combined with the omission of `certgen`, there is no trusted self-signed fallback.
 - HSTS is on by default in the public variant (`HSTS: max-age=31536000`) and is **sticky**: after the first HTTPS response, browsers refuse plain HTTP to the domain for a year. Get certs working before exposing a host publicly, and test with `LETSENCRYPT_TEST: "true"` (Let's Encrypt staging) first.
+- The `nginx` build wraps the hardened `mreil/nginx-proxy-hardened` base (Alpine; `docker-gen`/`forego` compiled from source, Trivy-clean) and only bakes in the `conf.d` snippets. `certgen`/`maxbody` copy their `docker-gen` binary from `mreil/docker-gen-hardened` (override `DOCKER_GEN_HARDENED_TAG` to pin), and the public variant's `acme-companion` is wrapped the same way (`apk upgrade` + hardened `docker-gen`).
 - Downstream containers can override `HTTPS_METHOD` and `HSTS` per-vhost (nginx-proxy reads them from the proxied container's environment). A downstream service that sets e.g. `HTTPS_METHOD=nohttps` bypasses the public variant's TLS enforcement — review proxied containers before trusting the redirect/HSTS guarantees.
 
 ## Notes
 
 - No `x-hosts` anchors in `docker-compose.yml`: this file is an infra-only proxy and defines zero `VIRTUAL_HOST`/`ACME_HOST` values — hostnames live in downstream clusters, so anchors would deduplicate nothing.
-- `nginx` wraps the upstream `nginxproxy/nginx-proxy` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` still uses the upstream image unchanged — the upstream image *is* the service.
+- `nginx` wraps the hardened `mreil/nginx-proxy-hardened` image with a small build that bakes in the `conf.d` snippets (no custom entrypoint, no first-run seeding); `acme-companion` (public variant) is likewise wrapped to patch OS packages and rebuild its `docker-gen` binary — the base images are the service, this repo only adds config.
 - The default LAN variant serves plain HTTP and self-signed HTTPS; the public variant adds real Let's Encrypt certs for any container that opts in via `ACME_HOST`.
 - Cert: RSA 2048, SHA-256, self-signed, `CN=<host>`, SAN `DNS:<host>` (the exact opted-in `VIRTUAL_HOST`, no wildcard).
 - `certgen` (LAN variant) needs the docker socket to watch events and to trigger nginx reloads. It locates the nginx container dynamically by compose labels (`com.docker.compose.service=nginx`, preferring its own compose project); set `$NGINX_CONTAINER` to override.

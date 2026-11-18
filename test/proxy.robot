@@ -23,7 +23,7 @@ Compose Env
     [Documentation]    Base env for every compose invocation.
     ${env}=    Create Dictionary
     ...    NGINX_PROXY_NETWORK=${NETWORK}
-    ...    NGINX_PROXY_VERSION=1.11
+    ...    NGINX_PROXY_VERSION=alpine
     ...    CERT_DAYS=825
     ...    GEN_REMOVAL_GRACE=60
     ...    COMPOSE_IGNORE_ORPHANS=True

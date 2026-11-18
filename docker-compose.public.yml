@@ -11,7 +11,11 @@ services:
     volumes:
       - certs:/etc/nginx/certs:ro
   acme-companion:
-    image: nginxproxy/acme-companion:${ACME_COMPANION_VERSION:?ACME_COMPANION_VERSION must be defined in .env}
+    build:
+      context: ./acme
+      args:
+        ACME_COMPANION_VERSION: ${ACME_COMPANION_VERSION:?ACME_COMPANION_VERSION must be defined in .env}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
     labels:
       homepage.group: Infrastructure

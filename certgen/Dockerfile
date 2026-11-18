@@ -1,3 +1,8 @@
+# docker-gen comes from the hardened image (source rebuild on a current Go
+# toolchain); override DOCKER_GEN_HARDENED_TAG to pin a `<upstream>-hardened.<n>` tag.
+ARG DOCKER_GEN_HARDENED_TAG=latest
+FROM mreil/docker-gen-hardened:${DOCKER_GEN_HARDENED_TAG} AS dockergen
+
 FROM alpine:3.24
 
 ARG BUILD_DATE=unknown
@@ -7,10 +12,7 @@ ENV BUILD_DATE=${BUILD_DATE}
 # openssl for cert generation, docker-cli to trigger nginx-proxy re-render
 RUN apk add --no-cache openssl docker-cli
 
-ARG DOCKER_GEN_VERSION=0.17.2
-ARG TARGETARCH=amd64
-ADD https://github.com/nginx-proxy/docker-gen/releases/download/${DOCKER_GEN_VERSION}/docker-gen-alpine-linux-${TARGETARCH}-${DOCKER_GEN_VERSION}.tar.gz /tmp/dg.tgz
-RUN tar -xzf /tmp/dg.tgz -C /usr/local/bin/ && rm /tmp/dg.tgz
+COPY --from=dockergen /usr/local/bin/docker-gen /usr/local/bin/docker-gen
 
 COPY docker/lib.sh docker/on-change.sh docker/entrypoint.sh /scripts/
 COPY docker/certs.tmpl /etc/docker-gen/certs.tmpl

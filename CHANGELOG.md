@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `nginx` is now built on the hardened `mreil/nginx-proxy-hardened` base
+  (Alpine; `docker-gen`/`forego` compiled from source, Trivy-clean) instead
+  of upstream `nginxproxy/nginx-proxy`. `NGINX_PROXY_VERSION` now selects
+  the hardened tag and defaults to `alpine` (floating = latest hardened
+  build); the local `Dockerfile` only adds the `conf.d` snippets.
+
+### Security
+
+### Superseded
+
+- The `nginx` `apt-get upgrade` + `docker-gen`/`forego` source-rebuild
+  layers are gone: the hardened `mreil/nginx-proxy-hardened` base already
+  ships both (Trivy-clean), so the local build only adds `conf.d` snippets
+  and an `apk upgrade` layer.
+- `certgen` and `maxbody` images copy their `docker-gen`
+  binary from `mreil/docker-gen-hardened` (source rebuild on a current Go
+  toolchain, fixing crypto/x509 CVE-2026-111943; no fixed upstream release
+  exists). Pin via `DOCKER_GEN_HARDENED_TAG`, default `latest`.
+- Public variant: `acme-companion` is now built from `./acme` (was: upstream
+  image used unchanged) with the same treatment — `apk upgrade` for Alpine
+  CVEs (brotli-libs, curl, openssl, openssh, bind-libs, jq) and the hardened
+  `docker-gen` (`DOCKER_GEN_HARDENED_TAG`, default `latest`).
+
+### Changed
+
 - LAN variant now sets `HTTPS_METHOD=redirect`: plain-HTTP requests to a
   vhost with a cert get a 301 to HTTPS (no HSTS, so browsers never pin it).
   Vhosts without a cert are unaffected — `ENABLE_HTTP_ON_MISSING_CERT=true`

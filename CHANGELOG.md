@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `nginx` sets `TRUST_DOWNSTREAM_PROXY=false`: nothing sits in front of this
+  proxy, so client `X-Forwarded-For` headers are no longer trusted (no IP
+  spoofing in logs or IP-based rules). Flip to `true` if a CDN/LB is ever
+  placed in front.
 - `nginx` is now built on the hardened `mreil/nginx-proxy-hardened` base
   (Alpine; `docker-gen`/`forego` compiled from source, Trivy-clean) instead
   of upstream `nginxproxy/nginx-proxy`. `NGINX_PROXY_VERSION` now selects

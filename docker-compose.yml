@@ -7,6 +7,10 @@ services:
         NGINX_PROXY_VERSION: ${NGINX_PROXY_VERSION:-alpine}
         BUILD_DATE: ${BUILD_DATE:-unknown}
     restart: unless-stopped
+    environment:
+      # No CDN/LB in front of this proxy: don't trust X-Forwarded-For from
+      # clients (prevents IP spoofing in logs and IP-based rules).
+      TRUST_DOWNSTREAM_PROXY: "false"
     ports:
       - "80:80"
     expose:
